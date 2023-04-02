@@ -24,6 +24,7 @@ void CodeDump(const char * filename);
 void StartCodeDump();
 
 void  emit_Skip(u32 sz);
+u32   emit_Set(u32 _new);
 
 void emit_Write32(u32 data);
 void insert_instruction(psp_insn_t insn);

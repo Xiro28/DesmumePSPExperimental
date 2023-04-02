@@ -981,7 +981,7 @@ template<int PROCNUM>
 FORCEINLINE u8 DYNA_MMU_read08(u32 addr) { return _MMU_read08(PROCNUM, MMU_AT_CODE, addr); }
 
 template<int PROCNUM>
-FORCEINLINE u16 DYNA_MMU_read16(u32 addr) { return _MMU_read16(PROCNUM, MMU_AT_CODE, addr); }
+FORCEINLINE u16 DYNA_MMU_read16(u32 addr) { return _MMU_read16(PROCNUM, MMU_AT_CODE, addr&0xFFFFFFFE); }
 
 template<int PROCNUM>
 FORCEINLINE u32 DYNA_MMU_read32(u32 addr) { return _MMU_read32(PROCNUM, MMU_AT_CODE, addr); }

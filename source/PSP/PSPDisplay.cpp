@@ -39,7 +39,7 @@
 #define GU_VRAM_WIDTH  512
 #define VRAM_START     0x4000000
 
-unsigned int __attribute__((aligned(64))) gulist[256 * 192 * 2];
+unsigned int __attribute__((aligned(64))) gulist[256 * 192 * 4];
 
 void*       frameBuffer   =  (void*)0;
 const void* doubleBuffer  =  (void*)0x44000;
@@ -125,8 +125,7 @@ public:
 	}
 
 	void MEMSetIcon(u16* buff) {
-		sceKernelDcacheWritebackInvalidateAll();
-		sceDmacMemcpy(data, buff, ICON_W * ICON_H * 2);
+		memcpy_vfpu(data, buff, ICON_W * ICON_H * 2);
 	}
 
 private:
@@ -136,8 +135,8 @@ private:
 	__attribute__((aligned(16))) u16 data[ICON_H * ICON_W * 3];
 };
 
-u16 _sel[0/*20*17*2*/];
-Icon menu [0/*MAX_COL*/];
+#define ICON_SZ 32
+Icon menu [MAX_COL * 2];
 
 void DrawIcon(u16 x, u16 y, u8 sprX, bool curON) {
 
@@ -145,25 +144,22 @@ void DrawIcon(u16 x, u16 y, u8 sprX, bool curON) {
 
 	struct DispVertex* vertices = (struct DispVertex*)sceGuGetMemory(2 * sizeof(struct DispVertex));
 
-	const u32 szH = (curON ? ICON_H : (ICON_H/2) + 30);
-	const u32 szW = (curON ? ICON_W : (ICON_W/2) + 30);
-
-	sceGuTexMode(GU_PSM_8888, 0, 0, 0);
-	sceGuTexImage(0, ICON_W*2, ICON_H, ICON_W, menu[sprX].GetIconData());
-	sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+	sceGuTexMode(GU_PSM_5551, 0, 0, 0);
+	sceGuTexImage(0, ICON_SZ, ICON_SZ, ICON_SZ, menu[sprX].GetIconData());
+	sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
 	sceGuTexFilter(GU_LINEAR, GU_LINEAR);
 	sceGuTexWrap(GU_CLAMP,GU_CLAMP);
 
 	vertices[0].u = 0;
 	vertices[0].v = 0;
 	vertices[0].x = x;
-	vertices[0].y = y;
+	vertices[0].y = y  - 10 * (1 + curON);
 	vertices[0].z = 0;
 
-	vertices[1].u = ICON_W;
-	vertices[1].v = ICON_H;
-	vertices[1].x = x + szW;
-	vertices[1].y = y + szH;
+	vertices[1].u = ICON_SZ;
+	vertices[1].v = ICON_SZ;
+	vertices[1].x = x + ICON_SZ + 15;
+	vertices[1].y = y + ICON_SZ + 15 - 10 * (1 + curON);
 	vertices[1].z = 0;
 
 	sceKernelDcacheWritebackInvalidateAll();
@@ -171,37 +167,6 @@ void DrawIcon(u16 x, u16 y, u8 sprX, bool curON) {
 
 }
 
-void DrawSel(u16 x, u16 y, u8 sprX, bool slide) {
-
-	sceGuColor(0xffffffff);
-
-	struct DispVertex* vertices = (struct DispVertex*)sceGuGetMemory(2 * sizeof(struct DispVertex));
-
-	const u32 szH = 17;
-	const u32 szW = 20;
-
-	sceGuTexMode(GU_PSM_8888, 0, 0, 0);
-	sceGuTexImage(0, szW*2, szH, szW, _sel);
-	sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
-	sceGuTexFilter(GU_LINEAR, GU_LINEAR);
-	sceGuTexWrap(GU_CLAMP,GU_CLAMP);
-
-	vertices[0].u = 0;
-	vertices[0].v = 0;
-	vertices[0].x = x;
-	vertices[0].y = y;
-	vertices[0].z = 0;
-
-	vertices[1].u = szW;
-	vertices[1].v = szH;
-	vertices[1].x = x + szW;
-	vertices[1].y = y + szH;
-	vertices[1].z = 0;
-
-	sceKernelDcacheWritebackInvalidateAll();
-	sceGuDrawArray(GU_SPRITES, TEXTURE_FLAGS, 2, NULL, vertices);
-
-}
 
 int curr_posX  = -1;
 int curr_page  =  0;
@@ -220,28 +185,25 @@ void drawmenu() {
 
 	static u8 last_Xpos = 0;
 
-	sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
-
 	sceGuStart(GU_DIRECT, gulist);
 	
 	sceGuClearColor(0x10404047);
 	sceGuClear(GU_COLOR_BUFFER_BIT);
-
-	char buffBattery[16];
-	sprintf(buffBattery, "Battery:%d%%", scePowerGetBatteryLifePercent());
-	intraFontPrint(Font, 230, 15, "Pre Release");
-	intraFontPrint(Font, 410, 15, buffBattery);
 	
-	for (int x = 30, romX = 0; x < 470; x += 150, romX++) {
-		if (N_Roms <= romX) break;
-		if (curr_posX == romX) DrawSel(x + 50, 40, romX,(last_Xpos != curr_posX%3));
-		//last_Xpos = curr_posX%3;
-		DrawIcon(x, 70, romX, true);
-		intraFontPrint(Font, x + ((ICON_W+5)/2), 250, menu[romX].GetIconName());
-	}
+	for (int y = 70, romX = 0; y <= 140; y += 70)
+		for (int x = 65; x < 470; x += 150, romX++) {
+			if (N_Roms <= romX) break;
+			
+			DrawIcon(x, y, romX, (curr_posX == romX));
+			
+			if (curr_posX == romX) intraFontPrintf(Font, 20, 240, "ROM: %s::%s", menu[romX].GetIconName(), menu[romX].GetFileName());
+		}
 
+	intraFontPrint(Font, 210, 15, "Pre Release");
+	intraFontPrintf(Font, 390, 15, "Battery:%d%%", scePowerGetBatteryLifePercent());
 
 	sceGuFinish();
+	sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
 
 void SetupDisp_EMU() {
@@ -271,13 +233,27 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 		{ 0, 0, 0, 1}
 	};
 
+	// Init draw an disp buffers from the base of the vram
+
+	//Reset 3D buffer
+	//sceGuDrawBuffer(GU_PSM_5551, (void*)doubleBuffer, GU_VRAM_WIDTH);
+
 	sceGuDrawBuffer(GU_PSM_5551, frameBuffer, GU_VRAM_WIDTH);
 	sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, (void*)frameBuffer, GU_VRAM_WIDTH);
+	sceGuDepthBuffer((void*)depthBuffer, GU_VRAM_WIDTH);
+
+	//sceGuDrawBufferList(GU_PSM_5551, (void*)depthBuffer, 512);
+
+	//sceGuDepthRange(65535, 0);
 
 	// Background color and disable scissor test
 	// because it is enabled by default with no size sets
 	sceGuClearColor(0xFF404040);
 	sceGuDisable(GU_SCISSOR_TEST);
+
+	sceGuDepthFunc(GU_GEQUAL);
+	sceGuEnable(GU_DEPTH_TEST);
+	//sceGuDepthBuffer(dbp0, 512);
 
 	// Enable clamped rgba texture mode
 	sceGuTexWrap(GU_CLAMP, GU_CLAMP);
@@ -286,7 +262,7 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 
 	// Enable modulate blend mode 
 	sceGuEnable(GU_BLEND);
-	sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGB);
+	sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
 	sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
 
 	sceGuSetMatrix(GU_PROJECTION, &_default);
@@ -294,13 +270,12 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 	sceGuSetMatrix(GU_MODEL, &_default);
 	sceGuSetMatrix(GU_VIEW, &_default);
 
-	//sceGuViewport(0, 0, 480, 272);
+	//sceGuOffset(2048 - (480 / 2), 2048 - (272 / 2));
+	sceGuViewport(0, 0, 480, 272);
 
 	// Turn the display on, and finish the current list
 	sceGuFinish();
 	sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
-
-	return;
 
 	sceGuDisplay(GU_TRUE);
 
@@ -311,9 +286,9 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 	static const char* font2 = "flash0:/font/ltn0.pgf"; //small font
 
 	intraFontInit();
-	Font = intraFontLoad(font, INTRAFONT_CACHE_MED);
+	Font = intraFontLoad(font, INTRAFONT_CACHE_ASCII);
 	intraFontActivate(Font);
-	intraFontSetStyle(Font, 0.6f, 0xFFFFFFFF, 0, 0, INTRAFONT_ALIGN_CENTER);
+	intraFontSetStyle(Font, 0.6f, 0xFFFFFFFF, 0, 0, 0);
 
 }
 
@@ -333,71 +308,26 @@ int readBanner(char* filename, tNDSBanner* banner) {
 	return 0;
 }
 
-void getImageData(u16 * buffer, const char * filename){
-
-	png_structp png_ptr;
-	png_infop info_ptr;
-	png_uint_32 width, height;
-	int bit_depth, color_type, interlace_type;
-	FILE *fp;
-
-	char fullpath[256];
-
-	const char * path = "icons/";
-	const char * default_icon = "icons/unknown.png";
-
-	strcpy(fullpath,path);
-	strncat(fullpath,filename,strlen(filename) - 3);
-	strcat(fullpath,"png");
-	printf("Path: %s",fullpath);
-	
-
-	if ((fp = fopen(fullpath, "rb")) == NULL){
-		if ((fp = fopen(default_icon, "rb")) == NULL) return;
-	}
-
-	png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-	if (png_ptr == NULL) {
-		fclose(fp);
-		return;
-	}
-
-	info_ptr = png_create_info_struct(png_ptr);
-	if (info_ptr == NULL) {
-		fclose(fp);
-		png_destroy_read_struct(&png_ptr, 0, 0);
-		return;
-	}
-
-	png_init_io(png_ptr, fp);
-	png_set_sig_bytes(png_ptr, 0);
-	png_read_info(png_ptr, info_ptr);
-	png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, 0, 0);
-	png_set_strip_16(png_ptr);
-	png_set_packing(png_ptr);
-
-	u16 * line = (u16*) malloc(width * 4);
-
-	for (u16 y = 0; y < height; y++) {
-		png_read_row(png_ptr, (u8*) line, 0);
-		for (u16 x = 0; x < width * 2; x++) {
-			u32 color32 = line[x];
-			u16 color16;
-			int r = color32 & 0xff;
-			int g = (color32 >> 8) & 0xff;
-			int b = (color32 >> 16) & 0xff;
-
-			color16 = (r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10);
-			buffer[x + y * width * 2] = line[x];
+void loadImage(unsigned short *image, unsigned short *palette, unsigned char *tileData) {
+	int tile, pixel;
+	for(tile = 0; tile < 16; tile++) {
+		for(pixel = 0; pixel < 32; pixel++) {
+			unsigned short a = tileData[(tile << 5) + pixel];
+			
+			int px = ((tile & 3) << 3) + ((pixel << 1) & 7);
+			int py = ((tile >> 2) << 3) + (pixel >> 2);
+			
+			unsigned short upper = (a & 0xf0) >> 4;
+			unsigned short lower = (a & 0x0f);
+			
+			if(upper != 0) image[(px + 1) + (py * 32)] = palette[upper];
+			else image[(px + 1) + (py * 32)] = 0;
+			
+			if(lower != 0) image[px + (py * 32)] = palette[lower];
+			else image[px + (py * 32)] = 0;
 		}
 	}
-	free(line);
-	png_read_end(png_ptr, info_ptr);
-	png_destroy_read_struct(&png_ptr, &info_ptr, 0);
-	fclose(fp);
-
 }
-
 
 bool CreateRomIcon(char* file, f_list* list) {
 
@@ -405,13 +335,13 @@ bool CreateRomIcon(char* file, f_list* list) {
 
 	tNDSBanner banner;
 
-	for (int c = 0; c < MAX_COL;c++) {
+	for (int c = 0; c < MAX_COL * 2;c++) {
 
 		if (list->cnt <= c) break;
 
 		char rompath[256];
 
-		int index = c + (curr_page * 3);
+		int index = c + (curr_page * 6);
 
 		if (list->cnt < index) break;
 
@@ -420,13 +350,14 @@ bool CreateRomIcon(char* file, f_list* list) {
 
 		if (readBanner(rompath, &banner)) {
 			return false;
+		}else{
+			loadImage(menu[c].GetIconData(), banner.palette, banner.icon);
+			//DStoRGBA(image, imageRGBA);
 		}
-
-		getImageData(menu[c].GetIconData(),list->fname[index].name);
 
 		menu[c].SetIconName(header.title);
 		//menu[c].SetDevName(getDeveloperNameByID(atoi(header.makercode)).c_str());
-		//menu[c].SetFileName(list->fname[index].name);
+		menu[c].SetFileName(list->fname[index].name);
 		N_Roms++;
 	}
 
@@ -440,12 +371,12 @@ void DrawRom(char* file, f_list* list, int pos, bool reload) {
 	//Get rom file path 
 	strcpy(rompath, file);
 
-	curr_page = pos / 3;
-	curr_posX = pos % 3;	
+	curr_page = pos / 6;
+	curr_posX = pos % 6;	
 
 	if (old_page != curr_page) {
 		CreateRomIcon(rompath, list);
-		getImageData(_sel,"sel.   ");
+		//getImageData(_sel,"sel.   ");
 		old_page = curr_page;
 	}
 	drawmenu();

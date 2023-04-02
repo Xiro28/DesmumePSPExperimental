@@ -2646,11 +2646,12 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 			}
 		}
 
-	if (l == 190) {
+	GPU_RenderLine_MasterBrightness(screen, l);
+
+	if (l == 191 && (gpu->core == GPU_MAIN)) {
 		memcpy((void*)GPU_Screen, (void*)ME_GPU_Screen, 192 * 256 * 4);
 	}
 
-	GPU_RenderLine_MasterBrightness(screen, l);
 	
 }
 

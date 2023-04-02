@@ -140,11 +140,10 @@ void SNDPSPUpdateAudio(s16 *buffer, u32 num_samples)
        copy2size = 0;
    }
 
-   sceKernelDcacheWritebackInvalidateAll();
-   sceDmacMemcpy((((u8*)stereodata16) + soundoffset), buffer, copy1size);
+   memcpy((((u8*)stereodata16) + soundoffset), buffer, copy1size);
 
    if (copy2size)
-       sceDmacMemcpy(stereodata16, ((u8*)buffer) + copy1size, copy2size);
+       memcpy(stereodata16, ((u8*)buffer) + copy1size, copy2size);
 
    soundoffset += copy1size + copy2size;
    soundoffset %= soundbufsize;

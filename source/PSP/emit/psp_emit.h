@@ -872,6 +872,20 @@ typedef enum
 #define emit_swc1(_ft, _rs, _offset) emit_imm(swc1, _rs, _ft, _offset)
 //  | lui rt, immediate
 #define emit_lui(_rt, _imm) emit_imm(lui, 0, _rt, _imm)
+
+#define fitsInShort(x) (((int16_t)x) == (x))
+
+#define psp_imm16_hi(x) ((x) >> 16)
+#define psp_imm16_lo(x) ((x) & 0xffff)
+
+#define emit_li(_rt, _imm) \
+	if (fitsInShort(_imm)) { \
+		emit_addiu(_rt, psp_zero, _imm); \
+	} else { \
+		emit_lui(_rt, psp_imm16_hi(_imm)); \
+		emit_ori(_rt, _rt, psp_imm16_lo(_imm)); \
+	}
+
 //  | j label
 #define emit_j(_target) emit_jump(j, psp_absolute_target(_target))
 //  | jal label
@@ -891,6 +905,9 @@ typedef enum
 //  | (beq|bne) rs, rt, label Custom
 #define emit_beqC(_rs, _rt, _offset, _offset2) emit_itypeC(psp_beq, _rs, _rt, psp_relative_target(_offset),_offset2)  
 #define emit_bneC(_rs, _rt, _offset, _offset2) emit_itypeC(psp_bne, _rs, _rt, psp_relative_target(_offset), _offset2)
+
+#define emit_beqlC(_rs, _rt, _offset, _offset2) emit_itypeC(psp_beql, _rs, _rt, psp_relative_target(_offset),_offset2)  
+#define emit_bnelC(_rs, _rt, _offset, _offset2) emit_itypeC(psp_bnel, _rs, _rt, psp_relative_target(_offset), _offset2)
 
 
 #define emit_cop1bc(_func, _imm) \

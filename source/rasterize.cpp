@@ -86,10 +86,6 @@ CACHE_ALIGN const float divide5bitBy31_LUT[32] = { 0.0,             0.0322580645
 													   0.7741935483871, 0.8064516129032, 0.8387096774194, 0.8709677419355,
 													   0.9032258064516, 0.9354838709677, 0.9677419354839, 1.0 };
 
-#ifndef LOWRAM
-struct Vertex __attribute__((aligned(32))) vertices[VERTLIST_SIZE];
-#endif
-
 static bool softRastHasNewData = false;
 
 
@@ -259,8 +255,7 @@ public:
 	//	sceGuDepthMask(enableDepthWrite);
 	}
 
-	bool setupMat = false;
-
+	struct Vertex* __attribute__((aligned(32))) vertices;
 	
 
 	union{
@@ -268,6 +263,7 @@ public:
 		u32 color;
 	}ArraytoColor;
 
+	
 	template<bool SLI>
 	FORCEINLINE void mainLoop(SoftRasterizerEngine* const engine)
 	{
@@ -286,15 +282,16 @@ public:
 
 		sceGuStart(GU_DIRECT, gulist);
 
-		sceGuEnable(GU_CLIP_PLANES);
+		//sceGuEnable(GU_CLIP_PLANES);
 
-		if (polyCount > 0){
+
+		{
 
 			ScePspFMatrix4 _matrx __attribute__((aligned(16))) = {
-				{1.f, 0, 0, 0},
-				{ 0, 1.f, 0, 0},
+				{0.9f, 0, 0, 0},
+				{ 0, 0.9f, 0, 0},
 				{ 0, 0, -1.f, 0},
-				{ 0, 0, 0, 1.f}
+				{ 0.05f, 0.05f, 0, 1.f}
 			};
 
 			sceGuSetMatrix(GU_PROJECTION, &_matrx);
@@ -303,10 +300,6 @@ public:
 			sceGuSetMatrix(GU_VIEW, &_matrx);
 		}
 
-		//Use VRAM mem to allow 32mb psp to run GU without going out of memory 
-	#ifdef LOWRAM
-		struct Vertex* __attribute__((aligned(32))) vertices = (struct Vertex*)sceGuGetMemory(VERTLIST_SIZE * sizeof(struct Vertex));
-	#endif	
 
 		sceGuDrawBufferList(GU_PSM_8888, (void*)renderTarget, 256);
 
@@ -315,9 +308,6 @@ public:
 		sceGuClearStencil(0);
 
 		sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT | GU_STENCIL_BUFFER_BIT);
-		
-		sceGuScissor(0, 0, 256, 192);
-		sceGuEnable(GU_SCISSOR_TEST);
 
 		static const int GUPrimitiveType[] = { GU_TRIANGLES , GU_TRIANGLE_FAN , GU_TRIANGLES , GU_TRIANGLE_FAN , GU_LINE_STRIP, GU_LINE_STRIP,GU_LINE_STRIP,GU_LINE_STRIP };
 
@@ -338,12 +328,12 @@ public:
 			SetupViewport(poly.viewport);
 		}
 
-		float Mul_vect[4];
 
-		for(int i=0, vertStartIndex = 0;i< polyCount; i++)
+		sceKernelDcacheWritebackInvalidateAll();
+		for(int i=1, vertStartIndex = 0; i < polyCount; i++)
 		{
 			POLY &poly = engine->polylist->list[engine->indexlist->list[i]];
-			size_t type = /*!poly.isWireframe() ? */GUPrimitiveType[poly.vtxFormat] /*: GU_LINE_STRIP*/;
+			size_t type = !poly.isWireframe() ? GUPrimitiveType[poly.vtxFormat] : GU_LINE_STRIP;
 
 			bool skip_poly = false;
 
@@ -355,49 +345,48 @@ public:
 
 				const VERT& vert = engine->vertlist->list[poly.vertIndexes[VertPolyIndex++]];
 
-				float w = vert.w;
-				float z = vert.z;
-				float y = vert.y;
-
-				if (w < 0) {skip_poly = true; break;}
+				if (vert.w < 0) {
+					skip_poly = true;
+					break;
+				}
 
 				ArraytoColor.a = 0xff;
-				ArraytoColor.r = vert.color[2] << 3;
+				ArraytoColor.r = vert.color[0] << 3;
 				ArraytoColor.g = vert.color[1] << 3;
-				ArraytoColor.b = vert.color[0] << 3;
+				ArraytoColor.b = vert.color[2] << 3;
 
 				vertices[j].col =  ArraytoColor.color;
-
-				float x = vert.x;
-
-				const float mul_w = 1/(w * 2);
 
 				vertices[j].u = vert.u;
 				vertices[j].v = vert.v;
 
-				vertices[j].x = x + w;
-				vertices[j].y = y + w;
-				vertices[j].z = z + w;
+				__asm__ volatile(				
+					// load vert.x vert.y vert.z vert.w
+					"lv.q			c000, 0 + %1\n"
+					
+					// add w to x and y
+					"vadd.s		    S000, S000, S003\n"
+					"vadd.s		    S001, S001, S003\n"
+					"vadd.s		    S002, S002, S003\n"
 
-				float Mul_vect[4] = {
-					mul_w,
-					mul_w,
-					mul_w,
-					0
-				};
+					// 1/(w*2)
+					"vadd.s		    S003, S003, S003\n"
+					"vrcp.s		    S003, S003\n"
 
-				/*__asm__ volatile(
-					"ulv.q			c100, 0 + %2\n"
-					"ulv.q			c200, 0 + %1\n"
-					"vmul.q		    c000, c100, c200\n"
-					"usv.s			s000, 0 + %0\n"
-					"usv.s			s001, 4 + %0\n"
-					"usv.s			s002, 8 + %0\n"
-					: "=m"(vertices[j].x)
-					: "m"(Mul_vect)
-					, "m"(vertices[j].x)
-					);*/
+					// mul x and y z by 1/(w*2)
+					"vscl.t		    c000, c000, S003\n"
+
+					// save x and y z
+					"sv.s			S000, 0 + %0\n"
+					"sv.s			S001, 4 + %0\n"
+					"sv.s			S002, 8 + %0\n"
+
+					: "+m"(vertices[j].x)
+					: "m"(vert.x)
+					: "memory"
+				);
 			}
+
 			
 			if (lastPolyAttr != poly.polyAttr)
 			{
@@ -405,7 +394,6 @@ public:
 				SetupPoly(poly);
 			}
 
-			if (skip_poly) continue;
 
 			if (lastTexParams != poly.texParam || lastTexPalette != poly.texPalette)
 			{
@@ -415,23 +403,18 @@ public:
 				lastTexPalette = poly.texPalette;
 			}
 
+			if (skip_poly) 
+				continue;
 			
-
-			sceKernelDcacheWritebackInvalidateAll();
 			sceGumDrawArray(type, GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_3D, VertSZ, 0, &vertices[vertStartIndex]);
 
 			vertStartIndex += VertSZ;
 		}
-
-		//sceGuDisable(GU_CLIP_PLANES);
-
-		sceGuScissor(0, 0, SCR_WIDTH, SCR_HEIGHT);
 		
 		sceGuFinish();
 
 		sceGuSync(0, 0);
 
-		sceKernelDcacheWritebackInvalidateAll();
 		memcpy_vfpu((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)renderTarget), disp_cpy_sz);
 	}
 
@@ -454,6 +437,9 @@ static char SoftRastInit(void)
 	{
 		return result;
 	}
+
+	rasterizerUnit[0].vertices = (struct Vertex*)sceGuGetMemory(VERTLIST_SIZE * sizeof(struct Vertex));
+	memset(&rasterizerUnit[0].vertices[0], 0, VERTLIST_SIZE * sizeof(struct Vertex));
 	
 	rasterizerUnit[0].SLI_MASK = 0;
 	rasterizerUnit[0].SLI_VALUE = 0;

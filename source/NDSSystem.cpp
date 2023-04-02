@@ -217,6 +217,8 @@ void renderScreenFull()
 	for (int i = 0;i < 192;++i) 
 		GPU_RenderLine((upScreen ? &MainScreen : &SubScreen), i, frameSkipper.ShouldSkip2D());
 
+	SPU_Emulate_core();
+
 	upScreen = !upScreen;
 }
 
@@ -242,7 +244,9 @@ int renderScreen(JobData data)
 
 	while (true) {
 
-		if (!PSP_UC(Do2dRender)) continue;
+		//if (!PSP_UC(Do2dRender)) continue;
+
+		while (!PSP_UC(Do2dRender)) {}
 
 		PSP_UC(Do2dRender) = false;
 		PSP_UC(RenderDone) = false;
@@ -684,9 +688,6 @@ static int rom_init_path(const char *filename, const char *physicalName, const c
 		gameInfo.loadROM(physicalName ? physicalName : path.path, type);
 	//}
 
-	
-	printf("SU cca\n");
-
 	//check that size is at least the size of the header
 	if (gameInfo.romsize < 352) {
 		return -1;
@@ -705,13 +706,9 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
 	if (filename == NULL)
 		return -1;
 
-	printf("qua1?\n");
-
 	ret = rom_init_path(filename, physicalName, logicalFilename);
 	if (ret < 1)
 		return ret;
-
-	printf("qua2?\n");
 
 	//check whether this rom is any kind of valid
 	if(!CheckValidRom((u8*)&gameInfo.header, gameInfo.secureArea))
@@ -745,8 +742,6 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
 		gameInfo.chipID |= (0x00 << 24);
 	}
 
-	printf("qua3?\n");
-
 
 	INFO("\nROM game code: %c%c%c%c\n", gameInfo.header.gameCode[0], gameInfo.header.gameCode[1], gameInfo.header.gameCode[2], gameInfo.header.gameCode[3]);
 	if (gameInfo.crc)
@@ -765,8 +760,6 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
 	buf[2] = gameInfo.header.gameCode[2];
 	buf[3] = gameInfo.header.gameCode[3];
 	buf[4] = 0;
-
-	printf("qua4?\n");
 
 	if (advsc.checkDB(buf, gameInfo.crc))
 	{
@@ -1253,7 +1246,7 @@ void Sequencer::init()
 }
 
 bool ARM7_SKIP_HACK = false;
-bool ARM9_SKIP_HACK = false;
+bool ARM9_SKIP_HACK = true;
 bool math_underclock = true;
 
 static void execHardware_hblank()
@@ -1666,11 +1659,12 @@ static FORCEINLINE s32 minarmtime(s32 arm9, s32 arm7)
 }
 
 template<bool doarm9, bool doarm7, bool jit>
-static /*donotinline*/ std::pair<s32,s32> armInnerLoop(
-	const u64 nds_timer_base, const s32 s32next, s32 arm9, s32 arm7)
+static /*donotinline*/ u32 armInnerLoop(
+const u64 nds_timer_base, const s32 s32next, s32 arm9, s32 arm7)
 {
-
 	s32 timer = minarmtime<doarm9,doarm7>(arm9,arm7);
+
+	bool skipARM7 = false;
 
 	while(timer < s32next && !sequencer.reschedule)
 	{
@@ -1691,7 +1685,7 @@ static /*donotinline*/ std::pair<s32,s32> armInnerLoop(
 			nds.idleCycles[0] += arm9-temp;
 			if (gxFIFO.size < 255) nds.freezeBus &= ~1;
 		}
-		if(doarm7 && (!doarm9 || arm7 <= timer))
+		if((doarm7 || !skipARM7) && (!doarm9 || arm7 <= timer))
 		{
 			bool cpufreeze = !!(NDS_ARM7.freeze & (CPU_FREEZE_WAIT_IRQ|CPU_FREEZE_OVERCLOCK_HACK));
 
@@ -1707,11 +1701,12 @@ static /*donotinline*/ std::pair<s32,s32> armInnerLoop(
 			s32 temp = arm7;
 			arm7 = min(s32next, arm7 + kIrqWait);
 			nds.idleCycles[1] += arm7-temp;
-			if(arm7 == s32next)
-			{
+
+			skipARM7 = !(arm7 - s32next);
+			/*{
 				nds_timer = nds_timer_base + minarmtime<doarm9,false>(arm9,arm7);
 				return armInnerLoop<doarm9,false,jit>(nds_timer_base, s32next, arm9, arm7);
-			}
+			}*/
 		}
 
 		timer = minarmtime<doarm9,doarm7>(arm9,arm7);
@@ -1719,7 +1714,7 @@ static /*donotinline*/ std::pair<s32,s32> armInnerLoop(
 		nds_timer = nds_timer_base + timer;
 	}
 
-	return std::make_pair(arm9, arm7);
+	return (arm9<<16|arm7);
 }
 
 template<bool FORCE>
@@ -1766,18 +1761,17 @@ void NDS_exec(s32 nb)
 		s32 arm7 = (s32)(nds_arm7_timer-nds_timer);
 		s32 s32next = (s32)(next-nds_timer);
 
-		std::pair<s32,s32> arm9arm7;
-		
-		arm9arm7 = armInnerLoop<true,true,true>(nds_timer_base,s32next,arm9,arm7);
+		u32 arm9arm7 = armInnerLoop<true,true,true>(nds_timer_base,s32next,arm9,arm7);
 
-		ARM7_SKIP_HACK = nds.hw_status.VCount < 185 || (my_config.extrmarm7down && nds.hw_status.VCount > 230);
+		ARM7_SKIP_HACK = nds.hw_status.VCount < 180 || (my_config.extrmarm7down && nds.hw_status.VCount > 230);
+		//ARM7_SKIP_HACK = (nds.hw_status.VCount > 230 && ipc_fifo[ARM7].size > 0) || nds.hw_status.VCount < 185;
 
 		ARM9_SKIP_HACK = nds.hw_status.VCount > 250;
 
 		math_underclock = nds.hw_status.VCount > 250;
 
-		arm9 = arm9arm7.first;
-		arm7 = arm9arm7.second;
+		arm9 = arm9arm7>>16;
+		arm7 = arm9arm7&0xFFFF;
 		nds_arm9_timer = nds_timer_base+arm9;
 		nds_arm7_timer = nds_timer_base+arm7;
 

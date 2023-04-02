@@ -2542,31 +2542,49 @@ void DmaController::doCopy()
 	//outside the loop
 	int time_elapsed = 0;
 	if(sz==4) {
+		/*if((src & 0x0F000000) == 0x02000000 && (dst>>20 == 0x70)){
+			time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
+			
+			memcpy_vfpu(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], &MMU.MAIN_MEM[src & _MMU_MAIN_MEM_MASK32], todo);
 
-		//time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
-
-		for(s32 i=(s32)todo; i>0; i--)
-		{
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_READ,TRUE>(src,true);
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_WRITE,TRUE>(dst,true);
-			u32 temp = _MMU_read32(procnum,MMU_AT_DMA,src);
-			_MMU_write32(procnum,MMU_AT_DMA,dst, temp);   
-			dst += dstinc;
-			src += srcinc;
+			dst += dstinc * todo;
+			src += srcinc * todo;
+			
+			//printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
+		}else*/{
+			//printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
+			for(s32 i=(s32)todo; i>0; i--)
+			{
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_READ,TRUE>(src,true);
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_WRITE,TRUE>(dst,true);
+				u32 temp = _MMU_read32(procnum,MMU_AT_DMA,src);
+				_MMU_write32(procnum,MMU_AT_DMA,dst, temp);   
+				dst += dstinc;
+				src += srcinc;
+			}
 		}
 	} else {
 
-		//time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
+		/*if((src & 0x0F000000) == 0x02000000 && (dst>>20 == 0x50)){
+			time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
+			
+			memcpy_vfpu(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], &MMU.MAIN_MEM[src & _MMU_MAIN_MEM_MASK32], todo/2);
 
-		for(s32 i=(s32)todo; i>0; i--)
-		{
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_READ,TRUE>(src,true);
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_WRITE,TRUE>(dst,true);
-			u16 temp = _MMU_read16(procnum,MMU_AT_DMA,src);
-			_MMU_write16(procnum,MMU_AT_DMA,dst, temp);
-			dst += dstinc;
-			src += srcinc;
-		}
+			dst += dstinc * todo;
+			src += srcinc * todo;
+			
+			printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
+		}else{*/
+			for(s32 i=(s32)todo; i>0; i--)
+			{
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_READ,TRUE>(src,true);
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_WRITE,TRUE>(dst,true);
+				u16 temp = _MMU_read16(procnum,MMU_AT_DMA,src);
+				_MMU_write16(procnum,MMU_AT_DMA,dst, temp);
+				dst += dstinc;
+				src += srcinc;
+			}
+		//}
 	}
 
 	//printf("ARM%c dma of size %d from 0x%08X to 0x%08X took %d cycles\n",PROCNUM==0?'9':'7',todo*sz,saddr,daddr,time_elapsed);

@@ -26,7 +26,7 @@ u16 color;
 signed short x, y, z;
 };*/
 
-extern unsigned int __attribute__((aligned(64))) gulist[256 * 192 * 2];
+extern unsigned int __attribute__((aligned(64))) gulist[256 * 192 * 4];
 
 void Init_PSP_DISPLAY_FRAMEBUFF();
 

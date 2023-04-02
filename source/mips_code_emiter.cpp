@@ -19,6 +19,13 @@ u32   emit_getPointAdr() { return LastAddr;                                     
 u32   GetFreeSpace()     { return CODE_SIZE - LastAddr;                            }
 void  emit_Skip(u32 sz)  { LastAddr+=sz;                                           }
 u32   emit_SlideDelay()  { emit_Skip(-4); u32 rv=*(u32*)emit_GetPtr();  return rv; }
+u32   emit_Set(u32 _new)
+{
+	const u32 last = LastAddr;
+	LastAddr = _new;
+	return last;
+}
+
 
 //1+n opcodes
 void emit_mpush(u32 n, ...)

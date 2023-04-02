@@ -20,7 +20,7 @@
 //This handles almost all of the work of 3d rendering, leaving the renderer
 //plugin responsible only for drawing primitives.
 
-//#define FLUSHMODE_HACK
+#define FLUSHMODE_HACK
 
 //---------------
 //TODO TODO TODO TODO
@@ -61,8 +61,6 @@
 u32 max_polys, max_verts;
 #include "GPU_OSD.h"
 #endif
-
-#define FLUSHMODE_HACK
 
 
 /*
@@ -503,18 +501,8 @@ template<int NUM_ROWS>
 FORCEINLINE void vector_fix2float(float* matrix, const float divisor)
 {
 	static const float _div = (1.f / 4096.f);
-	/*for (int i = 0;i < NUM_ROWS * 4;i++)
-		matrix[i] *= _div;*/
-	switch (NUM_ROWS)
-	{
-	case 4:
-		MatrixDivide4X4(matrix, _div);
-		break;
-
-	case 3:
-		MatrixDivide3X3(matrix, _div);
-		break;
-	}
+	
+	NUM_ROWS == 4 ? MatrixDivide4X4(matrix, _div) : MatrixDivide3X3(matrix, _div);
 }
 
 #define OSWRITE(x) os->fwrite((char*)&(x),sizeof((x)));
@@ -685,18 +673,18 @@ void gfx3d_reset()
 
 
 float vec3dot(float* a, float* b) {
-	/*float res = 0;
+
+	float result;
 
 	__asm__ volatile (
-		"lv.q   C000,  %1			\n"
-		"lv.q   C100,  %2			\n"
-		"vhdp.t S000, C000, C100	\n"
+		"ulv.q   C000,  %1			\n"
+		"ulv.q   C100,  %2			\n"
+		"vhdp.q S000, C000, C100	\n"
 		"sv.s   S000,  %0			\n"
-		: "+m"(res) : "m"(*a), "m"(*b)
-		);
-	
-	return res;*/
-	return (((a[0]) * (b[0])) + ((a[1]) * (b[1])) + ((a[2]) * (b[2])));
+		: "=m"(result) : "m"(*a), "m"(*b)
+	);
+
+	return result;	
 }
 
 #define SUBMITVERTEX(ii, nn) polylist->list[polylist->count].vertIndexes[ii] = tempVertInfo.map[nn];
@@ -715,14 +703,55 @@ static void SetVertex()
 
 	if (texCoordinateTransform == 3)
 	{
+		__asm__ volatile (
 
-		last_s = ((coord[0] * mtxCurrent[3][0] +
+			"lv.s S000,  0 + %2\n"
+			"lv.s S001, 16 + %2\n"
+			"lv.s S002, 32 + %2\n"
+			
+			"lv.s S003, %3\n"
+
+			"lv.q C100,  0 + %1\n"
+
+			"vfim.s S010, 16\n"
+			"vmul.s S003, S003, S010\n"
+
+			"vhdp.t S000, C000, C100\n"
+
+			"vdiv.s S000, S000, S010\n"
+			
+			"sv.s S000, %0\n"
+			: "=m"(last_s) : "m"(coord[0]), "m"(mtxCurrent[3][0]), "m"(_s)
+		);
+
+		__asm__ volatile (
+
+			"lv.s S000,  0 + %2\n"
+			"lv.s S001, 16 + %2\n"
+			"lv.s S002, 32 + %2\n"
+			
+			"lv.s S003, %3\n"
+
+			"lv.q C100,  0 + %1\n"
+
+			"vfim.s S010, 16\n"
+			"vmul.s S003, S003, S010\n"
+
+			"vhdp.t S000, C000, C100\n"
+
+			"vdiv.s S000, S000, S010\n"
+			
+			"sv.s S000, %0\n"
+			: "=m"(last_t) : "m"(coord[0]), "m"(mtxCurrent[3][1]), "m"(_t)
+		);
+
+		/*last_s = ((coord[0] * mtxCurrent[3][0] +
 			coord[1] * mtxCurrent[3][4] +
-			coord[2] * mtxCurrent[3][8]) + _s * 16.0f) / 16.0f;
+			coord[2] * mtxCurrent[3][8]) + _s * 16.0f) / 16.0f;*/
 
-		last_t = ((coord[0] * mtxCurrent[3][1] +
+		/*last_t = ((coord[0] * mtxCurrent[3][1] +
 			coord[1] * mtxCurrent[3][5] +
-			coord[2] * mtxCurrent[3][9]) + _t * 16.0f) / 16.0f;
+			coord[2] * mtxCurrent[3][9]) + _t * 16.0f) / 16.0f;*/
 	}
 
 	//refuse to do anything if we have too many verts or polys
@@ -1231,11 +1260,53 @@ static void gfx3d_glNormal(u32 v)
 
 	if (texCoordinateTransform == 2)
 	{
-		last_s = ((normal[0] * mtxCurrent[3][0] + normal[1] * mtxCurrent[3][4] +
+		/*last_s = ((normal[0] * mtxCurrent[3][0] + normal[1] * mtxCurrent[3][4] +
 			normal[2] * mtxCurrent[3][8]) + (_s * 16.0f)) / 16.0f;
 
 		last_t = ((normal[0] * mtxCurrent[3][1] + normal[1] * mtxCurrent[3][5] +
-				normal[2] * mtxCurrent[3][9]) + (_t * 16.0f)) / 16.0f;
+				normal[2] * mtxCurrent[3][9]) + (_t * 16.0f)) / 16.0f;*/
+
+		__asm__ volatile (
+
+			"lv.s S000,  0 + %2\n"
+			"lv.s S001, 16 + %2\n"
+			"lv.s S002, 32 + %2\n"
+			
+			"lv.s S003, %3\n"
+
+			"lv.q C100,  0 + %1\n"
+
+			"vfim.s S010, 16\n"
+			"vmul.s S003, S003, S010\n"
+
+			"vhdp.t S000, C000, C100\n"
+
+			"vdiv.s S000, S000, S010\n"
+			
+			"sv.s S000, %0\n"
+			: "=m"(last_s) : "m"(normal[0]), "m"(mtxCurrent[3][0]), "m"(_s)
+		);
+
+		__asm__ volatile (
+
+			"lv.s S000,  0 + %2\n"
+			"lv.s S001, 16 + %2\n"
+			"lv.s S002, 32 + %2\n"
+			
+			"lv.s S003, %3\n"
+
+			"lv.q C100,  0 + %1\n"
+
+			"vfim.s S010, 16\n"
+			"vmul.s S003, S003, S010\n"
+
+			"vhdp.t S000, C000, C100\n"
+
+			"vdiv.s S000, S000, S010\n"
+			
+			"sv.s S000, %0\n"
+			: "=m"(last_t) : "m"(normal[0]), "m"(mtxCurrent[3][1]), "m"(_t)
+		);
 	}
 
 	MatrixMultVec3x3(mtxCurrent[2],normal);
@@ -1331,18 +1402,40 @@ static void gfx3d_glTexCoord(u32 val)
 	_t = (s16)(val >> 16);
 	_s = (s16)(val & 0xFFFF);
 
-	_s /= 16.0f;
-	_t /= 16.0f;
-
 	if (texCoordinateTransform == 1)
 	{
-			last_s = _s * mtxCurrent[3][0] + _t * mtxCurrent[3][4] +
-				0.0625f * mtxCurrent[3][8] + 0.0625f * mtxCurrent[3][12];
+		//printf("glTextcord\n");
+		__asm__ volatile (
+
+			"lv.s S000,  %1\n"
+			"lv.s S001,  %2\n"
+			"vfim.s S002, 0.0625\n"
+			"vfim.s S003, 0.0625\n"
+
+			"vscl.p C000, C000, S002\n"
+
+			"sv.s S000, %1\n"
+			"sv.s S001, %2\n"
+
+			"lv.q C100,  0 + %3\n"
+
+			"vmul.q C100, C000, C100\n"
+			"vfad.q S100, C100\n"
+			"sv.s S100, %0\n"
+
+			: "=m"(last_s), "+m"(_s), "+m"(_t): "m"(mtxCurrent[3][0])
+		);
+
+			/*last_s = _s * mtxCurrent[3][0] + _t * mtxCurrent[3][4] +
+				0.0625f * mtxCurrent[3][8] + 0.0625f * mtxCurrent[3][12];*/
 			last_t = _s * mtxCurrent[3][1] + _t * mtxCurrent[3][5] +
 				0.0625f * mtxCurrent[3][9] + 0.0625f * mtxCurrent[3][13];
 	}
 	else
 	{
+		_s /= 16.0f;
+		_t /= 16.0f;
+
 		last_s = _s;
 		last_t = _t;
 	}
@@ -1497,15 +1590,15 @@ static void gfx3d_glLightColor (u32 v)
 
 static BOOL gfx3d_glShininess (u32 val)
 {
-	/*gfx3d.state.shininessTable[shininessInd++] = ((val & 0xFF));
+	gfx3d.state.shininessTable[shininessInd++] = ((val & 0xFF));
 	gfx3d.state.shininessTable[shininessInd++] = (((val >> 8) & 0xFF));
 	gfx3d.state.shininessTable[shininessInd++] = (((val >> 16) & 0xFF));
-	gfx3d.state.shininessTable[shininessInd++] = (((val >> 24) & 0xFF));*/
+	gfx3d.state.shininessTable[shininessInd++] = (((val >> 24) & 0xFF));
 
-	gfx3d.state.shininessTable[shininessInd++] = ((val & 0xFF) / 256.0f);
+	/*gfx3d.state.shininessTable[shininessInd++] = ((val & 0xFF) / 256.0f);
 	gfx3d.state.shininessTable[shininessInd++] = (((val >> 8) & 0xFF) / 256.0f);
 	gfx3d.state.shininessTable[shininessInd++] = (((val >> 16) & 0xFF) / 256.0f);
-	gfx3d.state.shininessTable[shininessInd++] = (((val >> 24) & 0xFF) / 256.0f);
+	gfx3d.state.shininessTable[shininessInd++] = (((val >> 24) & 0xFF) / 256.0f);*/
 
 	if (shininessInd < 128) return FALSE;
 	shininessInd = 0;
@@ -2270,14 +2363,6 @@ void gfx3d_glFlush(u32 v)
 	
 	isSwapBuffers = TRUE;
 
-	//printf("%05d:%03d:%12lld: FLUSH\n",currFrameCounter, nds.VCount, nds_timer);
-	
-	//well, the game wanted us to flush.
-	//it may be badly timed. lets just flush it.
-#ifdef FLUSHMODE_HACK
-	gfx3d_doFlush();
-#endif
-
 	GFX_DELAY(1);
 }
 
@@ -2392,12 +2477,13 @@ static void gfx3d_doFlush()
 	osd->addFixed(180, 35, "%i/%i", max_polys, max_verts);		// max
 #endif
 
+
 //find the min and max y values for each poly.
 	//TODO - this could be a small waste of time if we are manual sorting the translucent polys
 	//TODO - this _MUST_ be moved later in the pipeline, after clipping.
 	//the w-division here is just an approximation to fix the shop in harvest moon island of happiness
 	//also the buttons in the knights in the nightmare frontend depend on this
-	for (int i = 0; i < polycount; i++)
+	/*for (int i = 0; i < polycount; i++)
 	{
 		// TODO: Possible divide by zero with the w-coordinate.
 		// Is the vertex being read correctly? Is 0 a valid value for w?
@@ -2431,7 +2517,7 @@ static void gfx3d_doFlush()
 			poly.maxz = max(poly.maxz, vertz);
 		}
 
-	}
+	}*/
 
 	//we need to sort the poly list with alpha polys last
 	//first, look for opaque polys
@@ -2459,7 +2545,7 @@ static void gfx3d_doFlush()
 	//should this be done after clipping??
     
 	//std::stable_sort(gfx3d.indexlist.list, gfx3d.indexlist.list + opaqueCount, gfx3d_ysort_compare);
-	std::stable_sort(gfx3d.indexlist.list, gfx3d.indexlist.list + opaqueCount, gfx3d_zsort_compare);
+	//std::stable_sort(gfx3d.indexlist.list, gfx3d.indexlist.list + opaqueCount, gfx3d_zsort_compare);
 	
 
 /*
@@ -2490,9 +2576,8 @@ void gfx3d_VBlankSignal()
 {
 	if (isSwapBuffers)
 	{
-#ifndef FLUSHMODE_HACK
 		gfx3d_doFlush();
-#endif
+
 		GFX_DELAY(392);
 		isSwapBuffers = FALSE;
 	}
