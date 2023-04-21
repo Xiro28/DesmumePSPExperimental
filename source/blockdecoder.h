@@ -33,7 +33,7 @@ static uint32_t block_procnum;
 #define _next_instr ((u32)(((u8*)&_ARMPROC.next_instruction) - ((u8*)&_ARMPROC)))
 #define _instr ((u32)(((u8*)&_ARMPROC.instruction) - ((u8*)&_ARMPROC)))
 
-#define mem_if_data (((u8*)&_ARMPROC.base_mem_if.data) - ((u8*)&_ARMPROC))
+#define main_mem ((u32)(((u8*)&_ARMPROC.MAIN_MEM[0]) - ((u8*)&_ARMPROC)))
 
 #define _flags ((u32)(((u8*)&_ARMPROC.CPSR.val) - ((u8*)&_ARMPROC)))
 #define _flag_N 31
@@ -54,7 +54,7 @@ static uint32_t block_procnum;
             jump_sz = emit_getCurrAdr();\
         }\
         {x;}\        
-        if (op.condition != -1 && (op.extra_flags&EXTFL_SAVECOND)){\
+        if (conditional_label != 0 && op.condition != -1 && (op.extra_flags&EXTFL_SAVECOND)){\
             jump_sz = emit_getCurrAdr() - jump_sz;\
             CompleteCondition(op.condition, conditional_label, emit_getCurrAdr() + jump_sz + 8);\
         }
@@ -64,6 +64,7 @@ enum op{
     OP_ITP,
     OP_AND,
     OP_ORR,
+    OP_BIC,
     OP_EOR,
     OP_ADD,
     OP_SUB,
@@ -73,12 +74,14 @@ enum op{
     OP_NEG,
     OP_MOV,
     OP_MVN,
-    OP_SWI,
 
     OP_LDR = 128,
+    OP_STR,
     OP_LDRH,
     OP_STRH,
     OP_STMIA,
+
+    OP_LSR_0,
 
     OP_CMP = 512,
     OP_TST,
@@ -88,35 +91,44 @@ enum op{
     OP_ADD_S,
     OP_SUB_S,
     OP_MOV_S,
-    OP_MVN_S
+    OP_MVN_S,
+    OP_SWI
 };
 
 enum opType{
-    PRE_OP_NONE,
     PRE_OP_LSL_IMM,
     PRE_OP_LSL_REG,
     PRE_OP_LSR_IMM,
     PRE_OP_LSR_REG,
     PRE_OP_ASR_IMM,
     PRE_OP_ASR_REG,
-    PRE_OP_IMM,
-    
-    PRE_OP_PRE_REG,
-    PRE_OP_POST_REG,
 
+    PRE_OP_REG_OFF,
+    PRE_OP_REG_PRE_P,
+    PRE_OP_REG_POST_P,
+    PRE_OP_REG_PRE_M,
+    PRE_OP_REG_POST_M,    
+
+    PRE_OP_IMM,
+    PRE_OP_PRE_P,
+    PRE_OP_POST_P,
+    PRE_OP_PRE_M,
+    PRE_OP_POST_M,
+
+    PRE_OP_NONE,
     NOFLAGS
 };
 
 
 enum extraFlags {
-    EXTFL_MERGECOND = 1,
-    EXTFL_SAVECOND = 2,
-    EXTFL_RELOADPC = 4,
+    EXTFL_NONE = 1,
+    EXTFL_MERGECOND = 2,
+    EXTFL_SAVECOND = 4,
     EXTFL_SKIPLOADFLAG = 8,
-    EXTFL_SKIPSAVEFLAG = 16
-
+    EXTFL_SKIPSAVEFLAG = 16,
+    EXTFL_DIRECTMEMACCESS = 32,
+    EXTFL_NOFLAGS = 64
 };
-
 
 struct opcode{
     uint32_t rd;
@@ -139,7 +151,7 @@ struct opcode{
         this->preOpType = preOpType;
         this->op_pc = pc;
         this->condition = condition;
-        this->extra_flags = extra_flags;
+        this->extra_flags = extra_flags|EXTFL_SAVECOND;
     }
 };
 
@@ -150,14 +162,14 @@ class block{
             printf("block created\n");
         }
 
-        void addOP(op _op, uint32_t pc, uint32 rd = -1, uint32 rs1 = -1, uint32 rs2 = -1, uint32 imm = -1, opType preOpType = PRE_OP_NONE, uint32_t condition = -1){
+        void addOP(op _op, uint32_t pc, uint32 rd = -1, uint32 rs1 = -1, uint32 rs2 = -1, uint32 imm = -1, opType preOpType = PRE_OP_NONE, uint32_t condition = -1, uint32_t extra_flags = EXTFL_SAVECOND){
             /*if (rd  < 16) reg_usage[rd  + 1] += 1;
             if (rs1 < 16) reg_usage[rs1 + 1] += 1;
             if (rs2 < 16) reg_usage[rs2 + 1] += 1;*/
 
-             if (_op >= OP_CMP || condition != -1) uses_flags = true;
+             if ((_op >= OP_CMP && _op != OP_SWI) || condition != -1) uses_flags = true;
 
-            opcodes.push_back(opcode(_op, rd, rs1, rs2, imm, preOpType, pc, condition));
+            opcodes.push_back(opcode(_op, rd, rs1, rs2, imm, preOpType, pc, condition, extra_flags));
         }
 
         void clearBlock(){
@@ -180,10 +192,14 @@ class block{
         void emitArmBranch();    
 
         void optimize_basicblock();
+        void optimize_basicblockThumb();
 
         bool noReadWriteOP = true;
         bool uses_flags = false;
         bool manualPrefetch = false;
+
+        u32 branch_addr = 0;
+        u32 start_addr = 0;
 
         char block_hash[1024];
 
@@ -201,10 +217,6 @@ class block{
 void emit_prefetch(const u8 isize, bool saveR15, bool is_ITP);
 
 extern block currentBlock;
-
-
-#define loadReg(psp_reg, nds_reg) emit_lw(psp_reg, RCPU, _reg(nds_reg))
-#define storeReg(psp_reg, nds_reg) emit_sw(psp_reg, RCPU, _reg(nds_reg))
 
 #define loadThumbReg(psp_reg, nds_reg) emit_lw(psp_reg, RCPU, _reg(nds_reg))
 #define storeThumbReg(psp_reg, nds_reg) emit_sw(psp_reg, RCPU, _reg(nds_reg))

@@ -606,51 +606,65 @@ void GameInfo::closeROM()
 	lastReadPos = 0xFFFFFFFF;
 }
 
+#include <unordered_map>
+
+std::unordered_map<u32, u32> cached_rom;
+
 u32 GameInfo::readROM(u32 pos)
 {
-	u32 num;
-	u32 data;
-	if (!romdata)
-	{
+	#ifdef PROFILE
+		u32 data = 0;
+
 		if (lastReadPos != pos)
 			fseek(fROM, pos + headerOffset, SEEK_SET);
-		num = fread(&data, 1, 4, fROM);
-		lastReadPos = (pos + num);
-	}
-	else
-	{
-		if(pos + 4 <= romsize)
-		{
-			//fast path
-			data = LE_TO_LOCAL_32(*(u32*)(romdata + pos));
-			num = 4;
-		}
-		else
-		{
-			data = 0;
-			num = 0;
-			for(int i=0;i<4;i++)
+
+			u32 num = fread(&data, 1, 4, fROM);
+
+			//in case we didn't read enough data, pad the remainder with 0xFF
+			u32 pad = 0;
+			while(num<4)
 			{
-				if(pos >= romsize)
-					break;
-				data |= (romdata[pos]<<(i*8));
-				pos++;
+				pad >>= 8;
+				pad |= 0xFF000000;
 				num++;
 			}
-		}
-	}
 
+			lastReadPos = (pos + num);
 
-	//in case we didn't read enough data, pad the remainder with 0xFF
-	u32 pad = 0;
-	while(num<4)
-	{
-		pad >>= 8;
-		pad |= 0xFF000000;
-		num++;
-	}
+			data = LE_TO_LOCAL_32(data) & ~pad | pad;
 
-	return LE_TO_LOCAL_32(data) & ~pad | pad;
+			return data;
+	#else
+		if (cached_rom.size() > 1024 * 128) cached_rom.clear();
+
+		u32 data = cached_rom[pos];
+
+		if (!data)
+		{
+			if (lastReadPos != pos)
+				fseek(fROM, pos + headerOffset, SEEK_SET);
+
+			u32 num = fread(&data, 1, 4, fROM);
+
+			//in case we didn't read enough data, pad the remainder with 0xFF
+			u32 pad = 0;
+			while(num<4)
+			{
+				pad >>= 8;
+				pad |= 0xFF000000;
+				num++;
+			}
+
+			lastReadPos = (pos + num);
+
+			data = LE_TO_LOCAL_32(data) & ~pad | pad;
+
+			cached_rom[pos] = data;
+
+			return data;
+		}else
+			return data;
+	#endif
 }
 
 bool GameInfo::isDSiEnhanced()
@@ -743,17 +757,17 @@ int NDS_LoadROM(const char *filename, const char *physicalName, const char *logi
 	}
 
 
-	INFO("\nROM game code: %c%c%c%c\n", gameInfo.header.gameCode[0], gameInfo.header.gameCode[1], gameInfo.header.gameCode[2], gameInfo.header.gameCode[3]);
+	printf("\nROM game code: %c%c%c%c\n", gameInfo.header.gameCode[0], gameInfo.header.gameCode[1], gameInfo.header.gameCode[2], gameInfo.header.gameCode[3]);
 	if (gameInfo.crc)
-		INFO("ROM crc: %08X\n", gameInfo.crc);
+		printf("ROM crc: %08X\n", gameInfo.crc);
 	if (!gameInfo.isHomebrew())
 	{
-		INFO("ROM serial: %s\n", gameInfo.ROMserial);
-		INFO("ROM chipID: %08X\n", gameInfo.chipID);
-		INFO("ROM internal name: %s\n", gameInfo.ROMname);
+		printf("ROM serial: %s\n", gameInfo.ROMserial);
+		printf("ROM chipID: %08X\n", gameInfo.chipID);
+		printf("ROM internal name: %s\n", gameInfo.ROMname);
 		if (gameInfo.isDSiEnhanced()) INFO("ROM DSi Enhanced\n");
 	}
-	INFO("ROM developer: %s\n", ((gameInfo.header.makerCode == 0) && gameInfo.isHomebrew())?"Homebrew":getDeveloperNameByID(gameInfo.header.makerCode).c_str());
+	printf("ROM developer: %s\n", ((gameInfo.header.makerCode == 0) && gameInfo.isHomebrew())?"Homebrew":getDeveloperNameByID(gameInfo.header.makerCode).c_str());
 
 	buf[0] = gameInfo.header.gameCode[0];
 	buf[1] = gameInfo.header.gameCode[1];
@@ -1163,6 +1177,7 @@ void NDS_RescheduleReadSlot1(int procnum, int size)
 	NDS_Reschedule();*/
 }
 
+
 void NDS_RescheduleGXFIFO(u32 cost)
 {
 	if(!sequencer.gxfifo.enabled) {
@@ -1170,7 +1185,8 @@ void NDS_RescheduleGXFIFO(u32 cost)
 		sequencer.gxfifo.enabled = true;
 	}
 	MMU.gfx3dCycles += cost;
-	NDS_Reschedule();
+	
+	sequencer.reschedule = true;
 }
 
 void NDS_RescheduleTimers()
@@ -1180,14 +1196,13 @@ void NDS_RescheduleTimers()
 	check(1,0); check(1,1); check(1,2); check(1,3);
 #undef check
 
-	NDS_Reschedule();
+	sequencer.reschedule = true;
 }
 
 void NDS_RescheduleDMA()
 {
 	//TBD
-	NDS_Reschedule();
-
+	sequencer.reschedule = true;
 }
 
 
@@ -1392,7 +1407,8 @@ static void execHardware_hstart()
 	}
 	else if(nds.hw_status.VCount==262)
 	{
-		gfx3d_VBlankEndSignal(frameSkipper.ShouldSkip3D());
+		if (!frameSkipper.ShouldSkip3D() && my_config.Render3D)
+			gfx3d_VBlankEndSignal(frameSkipper.ShouldSkip3D());
 		
 		if (!NDS_ARM9.freeze && nds.hw_status.overclock < 2)
 		{
@@ -1438,13 +1454,7 @@ static void execHardware_hstart()
 
 		gfx3d_VBlankSignal();
 		//this isnt important for any known game, but it would be nice to prove it. 
-		NDS_RescheduleGXFIFO(392 * 2);
-
-		//Render 3D here
-		if (!frameSkipper.ShouldSkip3D() && my_config.Render3D) {
-			gfx3d_VBlankEndSignal(false);
-		}
-
+		//NDS_RescheduleGXFIFO(392 * 2);
 	}
 	
 	//write the new vcount
@@ -1659,7 +1669,7 @@ static FORCEINLINE s32 minarmtime(s32 arm9, s32 arm7)
 }
 
 template<bool doarm9, bool doarm7, bool jit>
-static /*donotinline*/ u32 armInnerLoop(
+static FORCEINLINE u32 armInnerLoop(
 const u64 nds_timer_base, const s32 s32next, s32 arm9, s32 arm7)
 {
 	s32 timer = minarmtime<doarm9,doarm7>(arm9,arm7);
@@ -2032,6 +2042,7 @@ bool NDS_LegitBoot()
 bool NDS_FakeBoot()
 {
 
+
 	NDS_header * header = NDS_getROMHeader();
 
 	if (!header) return false;
@@ -2228,6 +2239,8 @@ void NDS_Reset()
 
 	arm_jit_reset(true);
 
+	cached_rom.clear();
+
 	//initialize CP15 specially for this platform
 	//TODO - how much of this is necessary for firmware boot?
 	//(only ARM9 has CP15)
@@ -2259,7 +2272,7 @@ void NDS_Reset()
 
 	gpu3D->NDS_3D_Reset();
 
-	WIFI_Reset();
+	//WIFI_Reset();
 	memcpy(FW_Mac, (MMU.fw.data + 0x36), 6);
 
 	//this needs to happen last, pretty much, since it establishes the correct scheduling state based on all of the above initialization

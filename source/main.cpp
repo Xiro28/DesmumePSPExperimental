@@ -53,6 +53,10 @@
 #include "PSP/vram.h"
 #include "PSP/PSPDisplay.h"
 
+#ifdef PROFILE
+#include "pspprof.h"
+#endif
+
 
 #include "PSP/pspvfpu.h"
 
@@ -242,6 +246,10 @@ void ChangeRom(bool reset){
   if (reset){
     NDS_Reset();
 
+    #ifdef PROFILE
+      gprof_cleanup();
+    #endif
+
     //Init psp display again
     pspDebugScreenInitEx((void*)(0x44000000), PSP_DISPLAY_PIXEL_FORMAT_5551, 1);
     Init_PSP_DISPLAY_FRAMEBUFF();
@@ -291,6 +299,7 @@ int main(int argc, char **argv) {
 
   pspDebugScreenInitEx((void*)(0x44000000), PSP_DISPLAY_PIXEL_FORMAT_5551, 1);
 
+
   Init_PSP_DISPLAY_FRAMEBUFF();
 
   NDS_Init();
@@ -300,16 +309,20 @@ int main(int argc, char **argv) {
 
   slot2_Init();
 
-  slot2_Change(NDS_SLOT2_AUTO);
+  slot2_Change(NDS_SLOT2_NONE);
 
   /* Create the dummy firmware */
   NDS_CreateDummyFirmware( &fw_config);
 
-  ChangeRom(false);
-
-  EMU_Conf();
-
-  InitDisplayParams(&my_config);
+  #ifdef PROFILE
+    execute = true;
+    NDS_LoadROM("test.nds");
+    my_config.Render3D = true;
+    my_config.showfps = true;
+  #else
+    ChangeRom(false);
+    EMU_Conf();
+  #endif
 
   EMU_SCREEN();
 

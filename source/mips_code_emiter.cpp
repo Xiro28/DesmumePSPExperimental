@@ -61,7 +61,7 @@ void emit_Write32(u32 data)
 	LastAddr+=4;
 }
 
-void insert_instruction(psp_insn_t insn)
+void insert_instruction(psp_insn_t insn) 
 {
 	emit_Write32(insn.word);
 }

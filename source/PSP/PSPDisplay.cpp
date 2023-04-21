@@ -227,10 +227,10 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 	sceGuStart(GU_DIRECT, gulist);
 
 	ScePspFMatrix4 _default = {
-		{ 1, 0, 0, 0},
-		{ 0, 1, 0, 0},
-		{ 0, 0, 1, 0},
-		{ 0, 0, 0, 1}
+		{0.998f, 0, 0, 0},
+		{ 0, 0.998f, 0, 0},
+		{ 0, 0, 1.f, 0},
+		{ 0.001f, 0.001f, 0, 1.f}
 	};
 
 	// Init draw an disp buffers from the base of the vram

@@ -47,6 +47,8 @@ CACHE_ALIGN JIT_struct JIT;
 
 uintptr_t *JIT_struct::JIT_MEM[2][0x4000] = {{0}};
 
+//static u8 recompile_counts[(1<<26)/16];
+
 static uintptr_t *JIT_MEM[2][32] = {
    //arm9
    {
@@ -187,7 +189,7 @@ enum INSTR_R { DYNAREC, INTERPRET };
 
 typedef INSTR_R (*DynaCompiler)(uint32_t pc, uint32_t opcode);
 
-#define disable_op(name, PREOP, ...) static OP_RESULT ARM_OP_##name##_##PREOP (uint32_t pc, const u32 i) { return INTERPRET; }
+#define disable_op(name, PREOP, ...) static INSTR_R ARM_OP_##name##_##PREOP (uint32_t pc, const u32 i) { return INTERPRET; }
 
 #define ARM_OP_REG_(name, PREOP, _rd) \
    static INSTR_R ARM_OP_##name##_##PREOP (uint32_t pc, const u32 i)\
@@ -206,6 +208,17 @@ typedef INSTR_R (*DynaCompiler)(uint32_t pc, uint32_t opcode);
 #define ARM_OP_IMM(name, PREOP) ARM_OP_IMM_(name, PREOP, REG_POS(i,12))
 #define ARM_OP_REG(name, PREOP) ARM_OP_REG_(name, PREOP, REG_POS(i,12))
 
+#define ARM_OP_UNDEF(T) \
+   static const DynaCompiler ARM_OP_##T##_LSL_IMM = 0; \
+   static const DynaCompiler ARM_OP_##T##_LSL_REG = 0; \
+   static const DynaCompiler ARM_OP_##T##_LSR_IMM = 0; \
+   static const DynaCompiler ARM_OP_##T##_LSR_REG = 0; \
+   static const DynaCompiler ARM_OP_##T##_ASR_IMM = 0; \
+   static const DynaCompiler ARM_OP_##T##_ASR_REG = 0; \
+   static const DynaCompiler ARM_OP_##T##_ROR_IMM = 0; \
+   static const DynaCompiler ARM_OP_##T##_ROR_REG = 0; \
+   static const DynaCompiler ARM_OP_##T##_IMM_VAL = 0
+
 ARM_OP_IMM(AND, LSL_IMM)
 ARM_OP_REG(AND, LSL_REG)
 ARM_OP_IMM(AND, LSR_IMM)
@@ -217,7 +230,7 @@ static INSTR_R ARM_OP_AND_ROR_IMM (uint32_t pc, const u32 i) { return INTERPRET;
 static INSTR_R ARM_OP_AND_ROR_REG (uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_AND_IMM_VAL (uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_AND, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_AND, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -232,7 +245,7 @@ static INSTR_R ARM_OP_EOR_ROR_IMM (uint32_t pc, const u32 i) { return INTERPRET;
 static INSTR_R ARM_OP_EOR_ROR_REG (uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_EOR_IMM_VAL (uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_EOR, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_EOR, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -247,7 +260,7 @@ static INSTR_R ARM_OP_ORR_ROR_IMM (uint32_t pc, const u32 i) { return INTERPRET;
 static INSTR_R ARM_OP_ORR_ROR_REG (uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_ORR_IMM_VAL (uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_ORR, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_ORR, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
  
@@ -261,13 +274,13 @@ static INSTR_R ARM_OP_ADD_ROR_IMM (uint32_t pc, const u32 i) { return INTERPRET;
 static INSTR_R ARM_OP_ADD_ROR_REG (uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_ADD_IMM_VAL (uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_ADD, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_ADD, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
 ARM_OP_IMM(SUB, LSL_IMM)
 ARM_OP_REG(SUB, LSL_REG)
-ARM_OP_IMM(SUB, LSR_IMM)
+ARM_OP_IMM(SUB, LSR_IMM) 
 ARM_OP_REG(SUB, LSR_REG)
 ARM_OP_IMM(SUB, ASR_IMM)
 static INSTR_R ARM_OP_SUB_ASR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
@@ -275,19 +288,23 @@ static INSTR_R ARM_OP_SUB_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; 
 static INSTR_R ARM_OP_SUB_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_SUB_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_SUB, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_SUB, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
-static INSTR_R ARM_OP_BIC_LSL_IMM(uint32_t pc, const u32 i) { return INTERPRET; }
-static INSTR_R ARM_OP_BIC_LSL_REG(uint32_t pc, const u32 i) { return INTERPRET; }
-static INSTR_R ARM_OP_BIC_LSR_IMM(uint32_t pc, const u32 i) { return INTERPRET; }
-static INSTR_R ARM_OP_BIC_LSR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
-static INSTR_R ARM_OP_BIC_ASR_IMM(uint32_t pc, const u32 i) { return INTERPRET; }
+ARM_OP_IMM(BIC, LSL_IMM)
+ARM_OP_REG(BIC, LSL_REG)
+ARM_OP_IMM(BIC, LSR_IMM) 
+ARM_OP_REG(BIC, LSR_REG)
+ARM_OP_IMM(BIC, ASR_IMM)
 static INSTR_R ARM_OP_BIC_ASR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_BIC_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_BIC_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
-static INSTR_R ARM_OP_BIC_IMM_VAL(uint32_t pc, const u32 i) { return INTERPRET; }
+static INSTR_R ARM_OP_BIC_IMM_VAL(uint32_t pc, const u32 i)
+{ 
+   currentBlock.addOP(OP_AND, pc, REG_POS(i,12), REG_POS(i,16), -1, ~ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC; 
+}
 
 
 
@@ -313,7 +330,7 @@ static INSTR_R ARM_OP_RSB_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; 
 static INSTR_R ARM_OP_RSB_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_RSB_IMM_VAL(uint32_t pc, const u32 i) 
 {
-   currentBlock.addOP(OP_RSB, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_RSB, pc, REG_POS(i,12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC;
 }
 
@@ -348,10 +365,12 @@ static INSTR_R ARM_OP_MOV_LSL_IMM (uint32_t pc, const u32 i)
    if (i == 0xE1A00000)
       currentBlock.addOP(OP_NOP, pc, 0, 0, 0, 0, PRE_OP_NONE, -1);
    else
-      currentBlock.addOP(OP_MOV, pc, REG_POS(i,12), REG_POS(i,16), REG_POS(i, 0), ((i>>7)&0x1F), PRE_OP_LSL_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+      currentBlock.addOP(OP_MOV, pc, REG_POS(i,12), REG_POS(i,16), REG_POS(i, 0), ((i>>7)&0x1F), PRE_OP_LSL_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    
    return DYNAREC; 
 }
+
+
 ARM_OP_REG(MOV, LSL_REG)
 ARM_OP_IMM(MOV, LSR_IMM)
 ARM_OP_REG(MOV, LSR_REG)
@@ -361,7 +380,7 @@ static INSTR_R ARM_OP_MOV_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; 
 static INSTR_R ARM_OP_MOV_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_MOV_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_MOV, pc, REG_POS(i,12), -1, -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_MOV, pc, REG_POS(i,12), -1, -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -379,7 +398,7 @@ static INSTR_R ARM_OP_MVN_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; 
 static INSTR_R ARM_OP_MVN_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_MVN_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_MOV, pc, REG_POS(i,12), -1, -1, ~ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_MOV, pc, REG_POS(i,12), -1, -1, ~ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -387,18 +406,6 @@ static INSTR_R ARM_OP_MVN_IMM_VAL(uint32_t pc, const u32 i)
 //-----------------------------------------------------------------------------
 //   CMP
 //-----------------------------------------------------------------------------
-
-
-#define ARM_OP_UNDEF(T) \
-   static const DynaCompiler ARM_OP_##T##_LSL_IMM = 0; \
-   static const DynaCompiler ARM_OP_##T##_LSL_REG = 0; \
-   static const DynaCompiler ARM_OP_##T##_LSR_IMM = 0; \
-   static const DynaCompiler ARM_OP_##T##_LSR_REG = 0; \
-   static const DynaCompiler ARM_OP_##T##_ASR_IMM = 0; \
-   static const DynaCompiler ARM_OP_##T##_ASR_REG = 0; \
-   static const DynaCompiler ARM_OP_##T##_ROR_IMM = 0; \
-   static const DynaCompiler ARM_OP_##T##_ROR_REG = 0; \
-   static const DynaCompiler ARM_OP_##T##_IMM_VAL = 0
 
 
 #define use_flagOPS
@@ -414,12 +421,13 @@ static INSTR_R ARM_OP_CMP_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; 
 static INSTR_R ARM_OP_CMP_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_CMP_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_CMP, pc, -1, REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_CMP, pc, -1, REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }*/
 
 ARM_OP_UNDEF(CMP );
-
+ARM_OP_UNDEF(TST );
+/*/
 ARM_OP_IMM_(TST, LSL_IMM, -1)
 ARM_OP_REG_(TST, LSL_REG, -1)
 ARM_OP_IMM_(TST, LSR_IMM, -1)
@@ -430,11 +438,11 @@ static INSTR_R ARM_OP_TST_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; 
 static INSTR_R ARM_OP_TST_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_TST_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_TST, pc, -1, REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_TST, pc, -1, REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
-}
+}*/
 
-ARM_OP_IMM(AND_S, LSL_IMM)
+disable_op(AND_S, LSL_IMM)
 ARM_OP_REG(AND_S, LSL_REG)
 ARM_OP_IMM(AND_S, LSR_IMM)
 ARM_OP_REG(AND_S, LSR_REG)
@@ -444,11 +452,11 @@ static INSTR_R ARM_OP_AND_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET
 static INSTR_R ARM_OP_AND_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_AND_S_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_AND_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_AND_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
-ARM_OP_IMM(ORR_S, LSL_IMM)
+disable_op(ORR_S, LSL_IMM)
 ARM_OP_REG(ORR_S, LSL_REG)
 ARM_OP_IMM(ORR_S, LSR_IMM)
 ARM_OP_REG(ORR_S, LSR_REG)
@@ -458,12 +466,12 @@ static INSTR_R ARM_OP_ORR_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET
 static INSTR_R ARM_OP_ORR_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_ORR_S_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_ORR_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_ORR_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
 
-ARM_OP_IMM(EOR_S, LSL_IMM)
+disable_op(EOR_S, LSL_IMM)
 ARM_OP_REG(EOR_S, LSL_REG)
 ARM_OP_IMM(EOR_S, LSR_IMM)
 ARM_OP_REG(EOR_S, LSR_REG)
@@ -473,11 +481,11 @@ static INSTR_R ARM_OP_EOR_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET
 static INSTR_R ARM_OP_EOR_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_EOR_S_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_EOR_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_EOR_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC;
 }
 
-ARM_OP_IMM(MOV_S, LSL_IMM)
+disable_op(MOV_S, LSL_IMM)
 ARM_OP_REG(MOV_S, LSL_REG)
 ARM_OP_IMM(MOV_S, LSR_IMM)
 ARM_OP_REG(MOV_S, LSR_REG)
@@ -487,7 +495,7 @@ static INSTR_R ARM_OP_MOV_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET
 static INSTR_R ARM_OP_MOV_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_MOV_S_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_MOV_S, pc, REG_POS(i, 12), -1, -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_MOV_S, pc, REG_POS(i, 12), -1, -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -501,7 +509,7 @@ static INSTR_R ARM_OP_MVN_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET
 static INSTR_R ARM_OP_MVN_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_MVN_S_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_MOV_S, pc, REG_POS(i, 12), -1, -1, ~ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_MOV_S, pc, REG_POS(i, 12), -1, -1, ~ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -527,7 +535,7 @@ static OP_RESULT ARM_OP_SUB_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPR
 static OP_RESULT ARM_OP_SUB_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static OP_RESULT ARM_OP_SUB_S_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_SUB_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_SUB_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }*/
  
@@ -621,8 +629,7 @@ static INSTR_R ARM_OP_CLZ(uint32_t pc, const u32 i)
    static const DynaCompiler ARM_OP_##T##_P_ASR_##Q = 0; \
    static const DynaCompiler ARM_OP_##T##_M_ROR_##Q = 0; \
    static const DynaCompiler ARM_OP_##T##_P_ROR_##Q = 0; \
-   static const DynaCompiler ARM_OP_##T##_M_##Q = 0; \
-   static const DynaCompiler ARM_OP_##T##_P_##Q = 0
+   
 
 #define ARM_MEM_OP_DEF(T) \
    ARM_MEM_OP_DEF2(T, IMM_OFF_PREIND); \
@@ -632,13 +639,134 @@ static INSTR_R ARM_OP_CLZ(uint32_t pc, const u32 i)
 ARM_MEM_OP_DEF(STR);
 ARM_MEM_OP_DEF(LDR);
 ARM_MEM_OP_DEF(STRB);
-ARM_MEM_OP_DEF(LDRB);
+ARM_MEM_OP_DEF(LDRB); 
 
-static INSTR_R ARM_OP_STR(uint32_t pc, uint32_t opcode)
+
+inline bool isMainMemory(u32 addr)
 {
-   return INTERPRET;
+   return ((addr & 0x0F000000) == 0x02000000) && ((addr&(~0x3FFF)) != MMU.DTCMRegion);
 }
- 
+
+inline bool isDTCM(u32 addr)
+{
+   return (addr<0x02000000) && block_procnum == ARM9;
+}
+
+static INSTR_R ARM_OP_STR_P_IMM_OFF_PREIND(uint32_t pc, const u32 i){
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_STR_M_IMM_OFF_PREIND(uint32_t pc, const u32 i){
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_STR_M_IMM_OFF(uint32_t pc, const u32 i){
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1, -((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_STR_P_IMM_OFF(uint32_t pc, const u32 i){
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_STR_M_IMM_OFF_POSTIND(uint32_t pc, const u32 i){
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_STR_P_IMM_OFF_POSTIND(uint32_t pc, const u32 i){
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_LDR_M_IMM_OFF_PREIND(uint32_t pc, const u32 i){
+
+   if (REG_POS(i,12) == 15)
+      return INTERPRET;
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_LDR_P_IMM_OFF_PREIND(uint32_t pc, const u32 i){
+
+   if (REG_POS(i,12) == 15)
+      return INTERPRET;
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_LDR_M_IMM_OFF(uint32_t pc, const u32 i){
+
+   if (REG_POS(i,12) == 15) 
+      return INTERPRET;
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, -((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_LDR_P_IMM_OFF(uint32_t pc, const u32 i){
+
+   if (REG_POS(i,12) == 15)
+      return INTERPRET;
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)] + ((i)&0xFFF);
+
+   /*if (isDTCM(addr))
+      currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, EXTFL_DIRECTDTCM);
+   else*/
+      currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_LDR_M_IMM_OFF_POSTIND(uint32_t pc, const u32 i){
+
+   if (REG_POS(i,12) == 15)
+      return INTERPRET;
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1,isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static INSTR_R ARM_OP_LDR_P_IMM_OFF_POSTIND(uint32_t pc, const u32 i){
+
+   if (REG_POS(i,12) == 15)
+      return INTERPRET;
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   return DYNAREC; 
+}
+
+static const DynaCompiler ARM_OP_STRB_M_IMM_OFF_PREIND = 0;
+static const DynaCompiler ARM_OP_STRB_P_IMM_OFF_PREIND = 0;
+static const DynaCompiler ARM_OP_STRB_M_IMM_OFF = 0;
+static const DynaCompiler ARM_OP_STRB_P_IMM_OFF = 0;
+static const DynaCompiler ARM_OP_STRB_M_IMM_OFF_POSTIND = 0;
+static const DynaCompiler ARM_OP_STRB_P_IMM_OFF_POSTIND = 0;
+
+static const DynaCompiler ARM_OP_LDRB_M_IMM_OFF_PREIND = 0;
+static const DynaCompiler ARM_OP_LDRB_P_IMM_OFF_PREIND = 0;
+static const DynaCompiler ARM_OP_LDRB_M_IMM_OFF = 0;
+static const DynaCompiler ARM_OP_LDRB_P_IMM_OFF = 0;
+static const DynaCompiler ARM_OP_LDRB_M_IMM_OFF_POSTIND = 0;
+static const DynaCompiler ARM_OP_LDRB_P_IMM_OFF_POSTIND = 0;
+
+
 #define ARM_MEM_HALF_OP_DEF2(T, P) \
    static const DynaCompiler ARM_OP_##T##_##P##M_REG_OFF = 0; \
    static const DynaCompiler ARM_OP_##T##_##P##P_REG_OFF = 0; \
@@ -653,42 +781,52 @@ static INSTR_R ARM_OP_STR(uint32_t pc, uint32_t opcode)
 
 //ARM_MEM_HALF_OP_DEF(STRH);
 //ARM_MEM_HALF_OP_DEF(LDRH);
-ARM_MEM_HALF_OP_DEF(STRSB);
+ARM_MEM_HALF_OP_DEF(STRSB); 
 ARM_MEM_HALF_OP_DEF(LDRSB);
 ARM_MEM_HALF_OP_DEF(STRSH);
 ARM_MEM_HALF_OP_DEF(LDRSH);
 
 static INSTR_R ARM_OP_STRH_P_IMM_OFF(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_STRH, pc, -1, REG_POS(i, 16), REG_POS(i,12), ((i>>4)&0xF0)+(i&0xF), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,  isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 static INSTR_R ARM_OP_STRH_M_IMM_OFF(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_STRH, pc, -1, REG_POS(i, 16), REG_POS(i,12), -(((i>>4)&0xF0)+(i&0xF)), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, -(((i>>4)&0xF0)+(i&0xF)), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,  isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STRH_P_REG_OFF(uint32_t pc, const u32 i)
 {   
    return INTERPRET;
-   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 0), REG_POS(i, 16), REG_POS(i,12), 0xDEAD, PRE_OP_PRE_REG, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i, 12), REG_POS(i,0), -1, PRE_OP_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STRH_M_REG_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 0), REG_POS(i, 16), REG_POS(i,12), -1, PRE_OP_REG_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_PRE_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_PRE_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_PRE_INDE_P_REG_OFF(uint32_t pc, const u32 i)
@@ -704,11 +842,15 @@ static INSTR_R ARM_OP_STRH_PRE_INDE_M_REG_OFF(uint32_t pc, const u32 i)
 static INSTR_R ARM_OP_STRH_POS_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_POS_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_POS_INDE_P_REG_OFF(uint32_t pc, const u32 i)
@@ -721,21 +863,26 @@ static INSTR_R ARM_OP_STRH_POS_INDE_M_REG_OFF(uint32_t pc, const u32 i)
    return INTERPRET;
 }
 
+
+//LDRH
 static INSTR_R ARM_OP_LDRH_P_IMM_OFF(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+   u32 addr = _ARMPROC.R[REG_POS(i, 16)] + (((i>>4)&0xF0)+(i&0xF));
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 static INSTR_R ARM_OP_LDRH_M_IMM_OFF(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, -(((i>>4)&0xF0)+(i&0xF)), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+   u32 addr = _ARMPROC.R[REG_POS(i, 16)] - (((i>>4)&0xF0)+(i&0xF));
+
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, -(((i>>4)&0xF0)+(i&0xF)), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_LDRH_P_REG_OFF(uint32_t pc, const u32 i)
 {   
    return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), REG_POS(i, 0), 0, PRE_OP_PRE_REG, instr_is_conditional(i) ? CONDITION(i) : -1);
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), REG_POS(i, 0), 0, PRE_OP_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -746,15 +893,15 @@ static INSTR_R ARM_OP_LDRH_M_REG_OFF(uint32_t pc, const u32 i)
 
 static INSTR_R ARM_OP_LDRH_PRE_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), 0, (((i>>4)&0xF0)+(i&0xF)), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+    return INTERPRET;
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC;
 }
 
 static INSTR_R ARM_OP_LDRH_PRE_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), 0, -(((i>>4)&0xF0)+(i&0xF)), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+    return INTERPRET;
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC;
 }
 
@@ -770,12 +917,16 @@ static INSTR_R ARM_OP_LDRH_PRE_INDE_M_REG_OFF(uint32_t pc, const u32 i)
 
 static INSTR_R ARM_OP_LDRH_POS_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+    return INTERPRET;
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC;
 }
 
 static INSTR_R ARM_OP_LDRH_POS_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+    return INTERPRET;
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return DYNAREC;
 }
 
 static INSTR_R ARM_OP_LDRH_POS_INDE_P_REG_OFF(uint32_t pc, const u32 i)
@@ -788,7 +939,22 @@ static INSTR_R ARM_OP_LDRH_POS_INDE_M_REG_OFF(uint32_t pc, const u32 i)
    return INTERPRET;
 }
 
-#define ARM_OP_B  0
+#define SIGNEXTEND_24(i) (((s32)i<<8)>>8)
+
+static INSTR_R ARM_OP_B(uint32_t pc, const u32 i)
+{
+   u32 tmp = _ARMPROC.R[15];
+   u32 off = SIGNEXTEND_24(i);
+   bool _thumb = (CONDITION(i)==0xF);
+
+	tmp += (off<<2);
+
+	currentBlock.branch_addr = tmp & (0xFFFFFFFC|(BIT0(tmp)<<1));
+
+   //if (currentBlock.branch_addr == currentBlock.start_addr) printf("WARNING: B to self\n");
+   return INTERPRET;
+}
+
 #define ARM_OP_BL 0
 
 //-----------------------------------------------------------------------------
@@ -812,6 +978,8 @@ static INSTR_R ARM_OP_MRS_SPSR(uint32_t pc, const u32 i)
 //   SWP/SWPB
 //-----------------------------------------------------------------------------
 
+#define _ARMPROC (block_procnum ? NDS_ARM7:NDS_ARM9)
+
 static INSTR_R ARM_OP_SWP (uint32_t pc, const u32 i) { return INTERPRET;  };
 static INSTR_R ARM_OP_SWPB(uint32_t pc, const u32 i) { return INTERPRET;  };
 
@@ -822,12 +990,15 @@ static INSTR_R ARM_OP_MCR(uint32_t pc, const u32 i){
 
 
 static INSTR_R ARM_OP_SWI(uint32_t pc, const u32 i){
-   return INTERPRET;
-   currentBlock.addOP(OP_SWI, pc, -1, ((i>>16)&0x1F));
+   currentBlock.addOP(OP_SWI, pc, -1, ((i>>16)&0x1F), -1, -1, PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
    return DYNAREC;
 }
 
 static INSTR_R ARM_OP_BX(uint32_t pc, const u32 i){
+   u32 tmp = _ARMPROC.R[REG_POS(i, 0)];
+	currentBlock.branch_addr = tmp & (0xFFFFFFFC|(BIT0(tmp)<<1));
+
+   if (currentBlock.branch_addr == currentBlock.start_addr) printf("WARNING: BX to self\n");
    return INTERPRET;
 }
 
@@ -922,7 +1093,8 @@ static INSTR_R THUMB_OP_ASR(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_LSL_0(uint32_t pc, const u32 i)
 {
-   return DYNAREC;
+   currentBlock.addOP(OP_MOV, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
+   return DYNAREC; 
 }
 
 static INSTR_R THUMB_OP_LSL(uint32_t pc, const u32 i)
@@ -930,20 +1102,23 @@ static INSTR_R THUMB_OP_LSL(uint32_t pc, const u32 i)
    return INTERPRET;
 }
 
+
 static INSTR_R THUMB_OP_LSR_0(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   printf("OP_LSR_0 not tested\n");
+   currentBlock.addOP(OP_LSR_0, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
+   return DYNAREC; 
 }
 
 static INSTR_R THUMB_OP_LSR(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   return INTERPRET; 
 }
 
 
 static INSTR_R THUMB_OP_MOV_IMM8(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_MOV, pc, _REG_NUM(i, 8), _REG_NUM(i, 8), -1, i&0xff, PRE_OP_IMM);
+   currentBlock.addOP(OP_MOV, pc, _REG_NUM(i, 8), -1, -1, i&0xff, PRE_OP_IMM);
    return DYNAREC;
 }
 
@@ -957,7 +1132,10 @@ static INSTR_R THUMB_OP_ADD_IMM8(uint32_t pc, const u32 i)
 static INSTR_R THUMB_OP_ADD_IMM3(uint32_t pc, const u32 i)
 {
    u32 imm = (i>>6)&0x07;
-   currentBlock.addOP(OP_ADD, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), -1, imm, PRE_OP_IMM);
+   if (imm == 0)
+      currentBlock.addOP(OP_MOV, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
+   else
+      currentBlock.addOP(OP_ADD, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), -1, imm, PRE_OP_IMM);
    return DYNAREC;
 }
 
@@ -969,28 +1147,25 @@ static INSTR_R THUMB_OP_ADD_REG(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_SUB_REG(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
    currentBlock.addOP(OP_SUB, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), _REG_NUM(i, 6));
    return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_CMP_IMM8(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   return INTERPRET; 
    currentBlock.addOP(OP_CMP, pc, -1, _REG_NUM(i, 8), -1, i&0xff, PRE_OP_IMM);
    return DYNAREC; 
 }
 
 static INSTR_R THUMB_OP_SUB_IMM8(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
    currentBlock.addOP(OP_SUB, pc, _REG_NUM(i, 8), _REG_NUM(i, 8), -1, i&0xff, PRE_OP_IMM);
    return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_SUB_IMM3(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
    u32 imm = (i>>6)&0x07;
    currentBlock.addOP(OP_SUB, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), -1, imm, PRE_OP_IMM);
    return DYNAREC;
@@ -1002,7 +1177,7 @@ static INSTR_R THUMB_OP_SUB_IMM3(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_AND(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_AND, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
+   currentBlock.addOP(OP_AND, pc, _REG_NUM(i, 0), _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
 
@@ -1019,7 +1194,7 @@ static INSTR_R THUMB_OP_CMN(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_NEG(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   return INTERPRET; 
    currentBlock.addOP(OP_NEG, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
@@ -1032,7 +1207,7 @@ static INSTR_R THUMB_OP_NEG(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_EOR(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_EOR, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
+   currentBlock.addOP(OP_EOR, pc, _REG_NUM(i, 0), _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
 
@@ -1048,7 +1223,7 @@ static INSTR_R THUMB_OP_MVN(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_ORR(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_ORR, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
+   currentBlock.addOP(OP_ORR, pc, _REG_NUM(i, 0), _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
 
@@ -1063,7 +1238,7 @@ static INSTR_R THUMB_OP_TST(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_CMP(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   return INTERPRET; 
    currentBlock.addOP(OP_CMP, pc, -1, _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
@@ -1075,8 +1250,9 @@ static INSTR_R THUMB_OP_ROR_REG(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_MOV_SPE(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
-   currentBlock.addOP(OP_MOV, pc, _REG_NUM(i, 0)  | ((i>>4)&8), _REG_NUM(i, 3), -1, 0, NOFLAGS);
+   u32 Rd = _REG_NUM(i, 0) | ((i>>4)&8);
+   
+   currentBlock.addOP(OP_MOV, pc, Rd, REG_POS(i, 3));
    return DYNAREC; 
 }
 
@@ -1087,7 +1263,7 @@ static INSTR_R THUMB_OP_ADD_SPE(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_MUL_REG(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_MUL, pc, _REG_NUM(i, 0), _REG_NUM(i, 3));
+   currentBlock.addOP(OP_MUL, pc, _REG_NUM(i, 0), _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
 
@@ -1109,13 +1285,15 @@ static INSTR_R THUMB_OP_B_UNCOND(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_ADJUST_P_SP(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   currentBlock.addOP(OP_ADD, pc, 13, 13, -1, ((i&0x7F)<<2), PRE_OP_IMM, EXTFL_NOFLAGS);
+   return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_ADJUST_M_SP(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
-}
+   currentBlock.addOP(OP_ADD, pc, 13, 13, -1, -((i&0x7F)<<2), PRE_OP_IMM, EXTFL_NOFLAGS);
+   return DYNAREC;
+} 
 
 static INSTR_R THUMB_OP_ADD_2PC(uint32_t pc, const u32 i)
 {
@@ -1124,12 +1302,13 @@ static INSTR_R THUMB_OP_ADD_2PC(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_ADD_2SP(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   currentBlock.addOP(OP_ADD, pc, _REG_NUM(i, 8), 13, -1, ((i&0xFF)<<2), PRE_OP_IMM, EXTFL_NOFLAGS);
+   return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_BL_10(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   return INTERPRET; 
 }
 
 static INSTR_R THUMB_OP_POP(uint32_t pc, const u32 i)
@@ -1144,7 +1323,6 @@ static INSTR_R THUMB_OP_PUSH(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_SWI_THUMB(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
    currentBlock.addOP(OP_SWI, pc, -1, i&0x1F);
    return DYNAREC;
 }
@@ -1163,11 +1341,18 @@ static INSTR_R THUMB_OP_LDRB_REG_OFF(uint32_t pc, const u32 i)
 static INSTR_R THUMB_OP_STRH_REG_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_STRH, pc, _REG_NUM(i, 3), _REG_NUM(i,0), _REG_NUM(i,6), 0, PRE_OP_REG_OFF, -2);
 }
 
 static INSTR_R THUMB_OP_LDRH_REG_OFF(uint32_t pc, const u32 i)
 {
+   u32 adr = _ARMPROC.R[_REG_NUM(i, 3)] + _ARMPROC.R[_REG_NUM(i, 6)];
+
    return INTERPRET;
+   /*if (isMainMemory(adr))
+      currentBlock.addOP(OP_LDRH, pc, _REG_NUM(i,0), _REG_NUM(i, 3), _REG_NUM(i, 6), -1, PRE_OP_REG_OFF, -1, EXTFL_DIRECTMEMACCESS);
+   else*/
+      currentBlock.addOP(OP_LDRH, pc, _REG_NUM(i,0), _REG_NUM(i, 3), _REG_NUM(i, 6), -1, PRE_OP_REG_OFF);
 }
 
 static INSTR_R THUMB_OP_STRB_IMM_OFF(uint32_t pc, const u32 i)
@@ -1182,35 +1367,57 @@ static INSTR_R THUMB_OP_LDRB_IMM_OFF(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_STRH_IMM_OFF(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_STRH, pc, -1, _REG_NUM(i, 3), _REG_NUM(i,0), ((i>>5)&0x3E));
+   u32 adr = _ARMPROC.R[_REG_NUM(i, 3)] + ((i>>5)&0x3E);
+
+   if (isMainMemory(adr))
+      currentBlock.addOP(OP_STRH, pc, _REG_NUM(i, 3), _REG_NUM(i, 0), -1, ((i>>5)&0x3E), PRE_OP_IMM, -2, EXTFL_DIRECTMEMACCESS);
+   else
+      currentBlock.addOP(OP_STRH, pc, _REG_NUM(i, 3), _REG_NUM(i, 0), -1, ((i>>5)&0x3E), PRE_OP_IMM, -2);
    return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_LDRH_IMM_OFF(uint32_t pc, const u32 i)
 {
-   currentBlock.addOP(OP_LDRH, pc, _REG_NUM(i,0), _REG_NUM(i, 3), -1, ((i>>5)&0x3E));
+   return INTERPRET;
+   u32 adr = _ARMPROC.R[_REG_NUM(i, 3)] + ((i>>5)&0x3E);
+
+   currentBlock.addOP(OP_LDRH, pc, _REG_NUM(i,0), _REG_NUM(i, 3), -1, ((i>>5)&0x3E), PRE_OP_IMM);
    return DYNAREC;
 }
 
 
 static INSTR_R THUMB_OP_STR_IMM_OFF(uint32_t pc, const u32 i)
 {
+   u32 adr = _ARMPROC.R[_REG_NUM(i, 3)] + ((i>>4)&0x7C);
+
    return INTERPRET;
+
+   /*if (isMainMemory(adr))
+      currentBlock.addOP(OP_STR, pc, _REG_NUM(i, 3), _REG_NUM(i, 0), -1, ((i>>4)&0x7C), PRE_OP_IMM, -1, EXTFL_DIRECTMEMACCESS);
+   else*/
+      currentBlock.addOP(OP_STR, pc, _REG_NUM(i, 3), _REG_NUM(i, 0), -1, ((i>>4)&0x7C), PRE_OP_IMM);
+   return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_STR_REG_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_STR, pc, _REG_NUM(i, 3), _REG_NUM(i, 0), _REG_NUM(i, 6), -1, PRE_OP_REG_OFF);
+   return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_LDR_REG_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_LDR, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), _REG_NUM(i, 6), -1, PRE_OP_REG_OFF);
+   return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_LDR_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
+   currentBlock.addOP(OP_LDR, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), -1, ((i>>4)&0x7C), PRE_OP_IMM);
+   return DYNAREC;
 }
 
 
@@ -1340,6 +1547,10 @@ bool instr_does_prefetch(u32 opcode)
 //   Compiler
 //-----------------------------------------------------------------------------
 
+void emit_checkblock_count(){
+   printf("block here\n");
+}
+
 template<int PROCNUM>
 static u32 compile_basicblock()
 {
@@ -1351,31 +1562,47 @@ static u32 compile_basicblock()
 				reg_gpr+psp_k0,
 				reg_gpr+psp_fp,
 				reg_gpr+psp_ra);
+   
+   if (thumb)
+      emit_mpush(5,
+               reg_gpr+psp_s0,
+               reg_gpr+psp_s1,
+               reg_gpr+psp_s2,
+               reg_gpr+psp_s3,
+               reg_gpr+psp_s4);
 
-   //StartCodeDump();
+   StartCodeDump();
 
-   emit_li(psp_k0,((u32)&ARMPROC));
+   emit_li(psp_k0,((u32)&ARMPROC), 2);
 
    if (thumb){
       if (currentBlock.emitThumbBlock<PROCNUM>()) //idle loop
          interpreted_cycles *= 10;
    }else{
       if (currentBlock.emitArmBlock<PROCNUM>()) //idle loop
-         interpreted_cycles *= 10;
+         interpreted_cycles *= 100;
    }
 
-   /*if (strcmp("", currentBlock.block_hash) == 0) {
+   /*if (strcmp(">:1:03:228FFE20:8DA0D787:049532BF:1CCCFF37:46FE1542", currentBlock.block_hash) == 0) {
       //emit_jal(emit_checkblock_count);
       //emit_nop();
-      CodeDump("1_07_dump.bin");
+      CodeDump("1_04_dump.bin");
       die("Code dump\n");
-   }*/
+   }*/ 
 
    if (currentBlock.manualPrefetch) 
    {
       emit_lw(psp_at, RCPU, _next_instr);
       emit_sw(psp_at, RCPU, _instr_adr);
    }
+
+   if (thumb)
+      emit_mpop(5,
+               reg_gpr+psp_s0,
+               reg_gpr+psp_s1,
+               reg_gpr+psp_s2,
+               reg_gpr+psp_s3,
+               reg_gpr+psp_s4);
 
    emit_mpop(4,
 				reg_gpr+psp_gp,
@@ -1414,7 +1641,7 @@ void build_ArmBasicblock(){
       uint32_t op = _MMU_read32<PROCNUM, MMU_AT_CODE>(pc&imask);
 
       DynaCompiler fc = arm_instruction_compilers[INSTRUCTION_INDEX(op)];
-      INSTR_R res = fc == 0 ? INTERPRET : fc(pc,op);
+      INSTR_R res = fc == 0 ? INTERPRET : fc(pc,op);;
 
       has_ended = instr_is_branch(op) || (opnum >= (my_config.DynarecBlockSize - 1));
 
@@ -1475,25 +1702,43 @@ void build_ThumbBasicblock(){
 
 template<int PROCNUM> u32 arm_jit_compile()
 {
-   if (GetFreeSpace() < 16 * 1024){
-      //printf("Dynarec code reset\n");
-      arm_jit_reset(true,true);
-   }
 
-   block_procnum = PROCNUM;
+   // prevent endless recompilation of self-modifying code, which would be a memleak since we only free code all at once.
+	// also allows us to clear compiled_funcs[] while leaving it sparsely allocated, if the OS does memory overcommit.
+	block_procnum = PROCNUM;
    interpreted_cycles = 0;
 
    thumb = ARMPROC.CPSR.bits.T == 1;
    base_adr = ARMPROC.instruct_adr;
    pc = base_adr; 
 
+   currentBlock.start_addr = base_adr;
+
+	/*u32 mask_adr = (base_adr & 0x07FFFFFE) >> 4;
+	if(((recompile_counts[mask_adr >> 1] >> 4*(mask_adr & 1)) & 0xF) > 8)
+	{
+		ArmOpCompiled f = op_decode[PROCNUM][thumb];
+		JIT_COMPILED_FUNC(base_adr, PROCNUM) = (uintptr_t)f;
+		return f();
+	}
+	recompile_counts[mask_adr >> 1] += 1 << 4*(mask_adr & 1);*/
+
+   if (GetFreeSpace() < 16 * 1024){
+      //printf("Dynarec code reset\n");
+      arm_jit_reset(true,true);
+   }
+
    currentBlock.clearBlock(); 
 
    if (!thumb) {
-      build_ArmBasicblock<PROCNUM>();
+      build_ArmBasicblock<PROCNUM>(); 
       currentBlock.optimize_basicblock();
+      /*ArmOpCompiled f = op_decode[PROCNUM][thumb];
+		JIT_COMPILED_FUNC(base_adr, PROCNUM) = (uintptr_t)f;
+		return f();*/
    }else{
       build_ThumbBasicblock<PROCNUM>();
+      currentBlock.optimize_basicblockThumb();
    }
 
    return compile_basicblock<PROCNUM>();

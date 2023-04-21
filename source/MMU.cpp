@@ -2614,12 +2614,14 @@ void DmaController::doCopy()
 
 void triggerDma(EDMAMode mode)
 {
-	MACRODO2(0, {
-		const int i=X;
-		MACRODO4(0, {
-			const int j=X;
-			MMU_new.dma[i][j].tryTrigger(mode);
-		});
+	MACRODO4(0, {
+		const int j=X;
+		MMU_new.dma[0][j].tryTrigger(mode);
+	});
+	
+	MACRODO4(0, {
+		const int j=X;
+		MMU_new.dma[1][j].tryTrigger(mode);
 	});
 }
 
@@ -3446,6 +3448,15 @@ bool validateIORegsRead(u32 addr, u8 size)
 #define VALIDATE_IO_REGS_READ(PROC, SIZE) ;
 #endif
 
+
+bool isSlot2(u32 addr)
+{
+	if (addr < 0x08000000) return false;
+	if (addr >= 0x0A010000) return false;
+	
+	return true;
+}
+
 //================================================================================================== ARM9 *
 //=========================================================================================================
 //=========================================================================================================
@@ -3465,8 +3476,9 @@ void FASTCALL _MMU_ARM9_write08(u32 adr, u8 val)
 		return;
 	}
 
-	if (slot2_write<ARMCPU_ARM9, u8>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM9, u8>(adr, val))
+		return;*/
+	if (isSlot2(adr)) return;
 
 	//block 8bit writes to OAM and palette memory
 	if ((adr & 0x0F000000) == 0x07000000) return;
@@ -3741,8 +3753,10 @@ void FASTCALL _MMU_ARM9_write16(u32 adr, u16 val)
 		return;
 	}
 
-	if (slot2_write<ARMCPU_ARM9, u16>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM9, u16>(adr, val))
+		return;*/
+
+	if (isSlot2(adr)) return;
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4195,8 +4209,9 @@ void FASTCALL _MMU_ARM9_write32(u32 adr, u32 val)
 		return ;
 	}
 
-	if (slot2_write<ARMCPU_ARM9, u32>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM9, u32>(adr, val))
+		return;*/
+	if (isSlot2(adr)) return;
 
 #if 0
 	if ((adr & 0xFF800000) == 0x04800000) {
@@ -4620,9 +4635,10 @@ u8 FASTCALL _MMU_ARM9_read08(u32 adr)
 	if(adr<0x02000000)
 		return T1ReadByte(MMU.ARM9_ITCM, adr&0x7FFF);
 
-	u8 slot2_val;
-	if (slot2_read<ARMCPU_ARM9, u8>(adr, slot2_val))
-		return slot2_val;
+	u8 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM9, u8>(adr, slot2_val))
+		return slot2_val;*/
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4730,9 +4746,10 @@ u16 FASTCALL _MMU_ARM9_read16(u32 adr)
 	if(adr<0x02000000)
 		return T1ReadWord_guaranteedAligned(MMU.ARM9_ITCM, adr & 0x7FFE);	
 
-	u16 slot2_val;
-	if (slot2_read<ARMCPU_ARM9, u16>(adr, slot2_val))
-		return slot2_val;
+	u16 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM9, u16>(adr, slot2_val))
+		return slot2_val;*/
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4842,9 +4859,10 @@ u32 FASTCALL _MMU_ARM9_read32(u32 adr)
 	if(adr<0x02000000) 
 		return T1ReadLong_guaranteedAligned(MMU.ARM9_ITCM, adr&0x7FFC);
 
-	u32 slot2_val;
-	if (slot2_read<ARMCPU_ARM9, u32>(adr, slot2_val))
-		return slot2_val;
+	u32 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM9, u32>(adr, slot2_val))
+		return slot2_val;*/
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4987,8 +5005,10 @@ void FASTCALL _MMU_ARM7_write08(u32 adr, u8 val)
 
 	if (adr < 0x02000000) return; //can't write to bios or entire area below main memory
 
-	if (slot2_write<ARMCPU_ARM7, u8>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM7, u8>(adr, val))
+		return;*/;
+	
+	if (isSlot2(adr)) return;
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5101,8 +5121,9 @@ void FASTCALL _MMU_ARM7_write16(u32 adr, u16 val)
 
 	if (adr < 0x02000000) return; //can't write to bios or entire area below main memory
 
-	if (slot2_write<ARMCPU_ARM7, u16>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM7, u16>(adr, val))
+		return;*/
+	if (isSlot2(adr)) return;
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5228,7 +5249,7 @@ void FASTCALL _MMU_ARM7_write16(u32 adr, u16 val)
 				return;
 			case REG_IE + 2 :
 				NDS_Reschedule();
-				//emu_halt();
+				//emu_halt(); 
 				MMU.reg_IE[ARMCPU_ARM7] = (MMU.reg_IE[ARMCPU_ARM7]&0xFFFF) | (((u32)val)<<16);
 				return;
 				
@@ -5293,8 +5314,10 @@ void FASTCALL _MMU_ARM7_write32(u32 adr, u32 val)
 	if (adr < 0x02000000) return; //can't write to bios or entire area below main memory
 
 
-	if (slot2_write<ARMCPU_ARM7, u32>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM7, u32>(adr, val))
+		return;*/
+	
+	if (isSlot2(adr)) return;
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5428,9 +5451,11 @@ u8 FASTCALL _MMU_ARM7_read08(u32 adr)
 			return WIFI_read16(adr) & 0xFF;
 	}
 
-	u8 slot2_val;
-	if (slot2_read<ARMCPU_ARM7, u8>(adr, slot2_val))
-		return slot2_val;
+	u8 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM7, u8>(adr, slot2_val))
+		return slot2_val;*/
+		
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5482,9 +5507,10 @@ u16 FASTCALL _MMU_ARM7_read16(u32 adr)
 	if ((adr & 0xFFFF0000) == 0x04800000)
 		return WIFI_read16(adr) ;
 
-	u16 slot2_val;
-	if (slot2_read<ARMCPU_ARM7, u16>(adr, slot2_val))
-		return slot2_val;
+	u16 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM7, u16>(adr, slot2_val))
+		return slot2_val;*/
 
     if (SPU_core->isSPU(adr))
     {
@@ -5582,9 +5608,10 @@ u32 FASTCALL _MMU_ARM7_read32(u32 adr)
 	if ((adr & 0xFFFF0000) == 0x04800000)
 		return (WIFI_read16(adr) | (WIFI_read16(adr+2) << 16));
 
-	u32 slot2_val;
-	if (slot2_read<ARMCPU_ARM7, u32>(adr, slot2_val))
-		return slot2_val;
+	u32 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM7, u32>(adr, slot2_val))
+		return slot2_val;*/
 
     if (SPU_core->isSPU(adr))
     {

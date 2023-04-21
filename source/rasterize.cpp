@@ -90,7 +90,7 @@ static bool softRastHasNewData = false;
 
 
 struct PolyAttr
-{
+{ 
 	u32 val;
 
 	bool decalMode;
@@ -149,8 +149,6 @@ public:
 	}
 
 	TexCacheItem* lastTexKey;
-	
-	VERT* verts[MAX_CLIPPED_VERTS];
 
     PolyAttr polyAttr;
 	int polynum;
@@ -159,16 +157,24 @@ public:
 
 	void SetupViewport(const u32 viewportValue) {
 		/*VIEWPORT viewport;
-		viewport.decode(viewportValue);*/
-		//sceGuOffset((viewport.width/2) , (viewport.height / 2));
-		//sceGuViewport(0, 192,512,384);
+		viewport.decode(viewportValue);
+		sceGuOffset(2048-(viewport.width/2),2048-(viewport.height / 2));
+		sceGuViewport(2048,2048,viewport.width,viewport.height);*/
 		sceGuViewport(0, 192,512,384);
+		//sceGuViewport(0, 192,512,384);
 
 	/*	if (viewport.x != 0)
 		printf("X: %d Y: %d W: %d H: %d \n", viewport.x, viewport.y, viewport.width, viewport.height);*/
 	}
 
-	void SetupTexture(POLY& thePoly) {
+	u32 roundToExp2(u32 val)
+	{
+		u32 ret = 1;
+		while(ret < val) ret <<= 1;
+		return ret;
+	}
+
+	void SetupTexture(POLY& thePoly, u32 &u, u32 &v) {
 		
 		if (thePoly.texParam == 0 || thePoly.getTexParams().texFormat == TEXMODE_NONE) {
 			sceGuDisable(GU_TEXTURE_2D);
@@ -188,10 +194,12 @@ public:
 			sceGuTexWrap(BIT16(newTexture->texformat) ? GU_REPEAT : GU_CLAMP, BIT17(newTexture->texformat) ? GU_REPEAT : GU_CLAMP);
 
 			u16 __attribute__((aligned(16))) tbw = newTexture->bufferWidth;
-			sceGuTexImage(0, newTexture->sizeX, newTexture->sizeY, tbw, newTexture->decoded);
+			sceGuTexImage(0, roundToExp2(newTexture->sizeX), roundToExp2(newTexture->sizeY), tbw, newTexture->decoded);
 			sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
 
-			sceGuTexScale(newTexture->invSizeX, newTexture->invSizeY);
+			u = newTexture->invSizeX;
+			v = newTexture->invSizeY;
+			//sceGuTexScale(newTexture->invSizeX, newTexture->invSizeY);
 		}
 	}
 
@@ -205,33 +213,7 @@ public:
 
 		bool enableDepthWrite = true;
 
-		if (attr.polygonMode == POLYGON_MODE_SHADOW)
-		{
-			sceGuEnable(GU_STENCIL_TEST);
-
-			sceGuShadeModel(GU_FLAT);
-
-			if (attr.polygonID == 0)
-			{
-				//when the polyID is zero, we are writing the shadow mask.
-				//set stencilbuf = 1 where the shadow volume is obstructed by geometry.
-				//do not write color or depth information.
-				sceGuStencilFunc(GU_NOTEQUAL, 0x80, 0xFF);
-				sceGuStencilOp(GU_KEEP, GU_ZERO, GU_KEEP);
-				//glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-				enableDepthWrite = false;
-			}
-			else
-			{
-				//when the polyid is nonzero, we are drawing the shadow poly.
-				//only draw the shadow poly where the stencilbuf==1.
-				sceGuStencilFunc(GU_EQUAL, 0, 0xFF);
-				sceGuStencilOp(GU_KEEP, GU_KEEP, GU_KEEP);
-				//glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-				enableDepthWrite = true;
-			}
-		}
-		else if (attr.isTranslucent)
+		 if (attr.isTranslucent)
 		{
 			//sceGuDisable(GU_STENCIL_TEST);
 			//glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -259,7 +241,7 @@ public:
 	
 
 	union{
-		struct{u8 b; u8 g ; u8 r; u8 a;};
+		struct{u8 a; u8 b ; u8 g; u8 r;};
 		u32 color;
 	}ArraytoColor;
 
@@ -267,31 +249,44 @@ public:
 	template<bool SLI>
 	FORCEINLINE void mainLoop(SoftRasterizerEngine* const engine)
 	{
+
+		using std::min;
+		using std::max;
+
+		const size_t polyCount = engine->clippedPolyCounter;
+
 		const static int disp_cpy_sz = 192 * 256 * 4;
 
 		const void* renderTarget __attribute__((aligned(16))) = (void*)0x44000;
 
 		this->engine = engine;
+		
+		if (polyCount == 0) {
+			memset((u32*)&_screen[0], 0, disp_cpy_sz);
+			return;
+		}
 
 		u32 lastTexParams = 0;
 		u32 lastTexPalette = 0;
 		u32 lastPolyAttr = 0;
 		u32 lastViewport = 0xFFFFFFFF;
 
-		const size_t polyCount = engine->polylist->count;
 
 		sceGuStart(GU_DIRECT, gulist);
 
-		//sceGuEnable(GU_CLIP_PLANES);
+		//sceGuEnable(GU_CULL_FACE);
 
+		//sceGuFrontFace(GU_CCW);
+
+		//sceGuEnable(GU_CLIP_PLANES);
 
 		{
 
 			ScePspFMatrix4 _matrx __attribute__((aligned(16))) = {
-				{0.9f, 0, 0, 0},
-				{ 0, 0.9f, 0, 0},
-				{ 0, 0, -1.f, 0},
-				{ 0.05f, 0.05f, 0, 1.f}
+				{0.998f, 0, 0, 0},
+				{ 0, 0.998f, 0, 0},
+				{ 0, 0, 1.f, 0},
+				{ 0.001f, 0.001f, 0, 1.f}
 			};
 
 			sceGuSetMatrix(GU_PROJECTION, &_matrx);
@@ -299,7 +294,6 @@ public:
 			sceGuSetMatrix(GU_MODEL, &_matrx);
 			sceGuSetMatrix(GU_VIEW, &_matrx);
 		}
-
 
 		sceGuDrawBufferList(GU_PSM_8888, (void*)renderTarget, 256);
 
@@ -313,52 +307,57 @@ public:
 
 		static const int sz[] = { 3, 4, 3, 4, 3, 4, 3, 4 };
 
-		// Set up initial states, but only if there are polygons to draw
-		{
-			POLY& poly = engine->polylist->list[engine->indexlist->list[0]];
+		bool first = true;
+		int VertListIndex = 0;
 
-			lastPolyAttr = poly.polyAttr;
-			this->SetupPoly(poly);
-
-			lastTexParams = poly.texParam;
-			lastTexPalette = poly.texPalette;
-			this->SetupTexture(poly);
-
-			lastViewport = poly.viewport;
-			SetupViewport(poly.viewport);
-		}
-
+		u32 currU = 0;
+		u32 currV = 0;
 
 		sceKernelDcacheWritebackInvalidateAll();
-		for(int i=1, vertStartIndex = 0; i < polyCount; i++)
+		for(int i=0; i < polyCount; i++)
 		{
-			POLY &poly = engine->polylist->list[engine->indexlist->list[i]];
-			size_t type = !poly.isWireframe() ? GUPrimitiveType[poly.vtxFormat] : GU_LINE_STRIP;
+			GFX3D_Clipper::TClippedPoly &clippedPoly = engine->clipper.clippedPolys[i];
+			POLY &poly = *clippedPoly.poly;
+			int type = clippedPoly.type;
 
-			bool skip_poly = false;
+			if (type < 3) continue;
 
-			int VertSZ = sz[poly.vtxFormat];
+			if (first || lastPolyAttr != poly.polyAttr)
+			{
+				lastPolyAttr = poly.polyAttr;
+				SetupPoly(poly);
+
+				lastViewport = poly.viewport;
+				SetupViewport(poly.viewport);
+			}
 
 
-			//OPTIMIZE THIS 
-			for (int j = vertStartIndex, VertPolyIndex = 0; j < VertSZ + vertStartIndex; ++j) {
+			if (first ||lastTexParams != poly.texParam || lastTexPalette != poly.texPalette)
+			{
+				this->SetupTexture(poly, currU, currV);
 
-				const VERT& vert = engine->vertlist->list[poly.vertIndexes[VertPolyIndex++]];
+				lastTexParams = poly.texParam;
+				lastTexPalette = poly.texPalette;
 
-				if (vert.w < 0) {
-					skip_poly = true;
-					break;
-				}
+				sceGuDrawArray(GUPrimitiveType[poly.vtxFormat], GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_3D, 0, 0, &vertices[VertListIndex]);
+			}
+
+			first = false;
+
+
+			for(int j=0;j<type;j++){
+				VERT &vert = clippedPoly.clipVerts[j];
+				Vertex &out = vertices[VertListIndex + j];
 
 				ArraytoColor.a = 0xff;
 				ArraytoColor.r = vert.color[0] << 3;
 				ArraytoColor.g = vert.color[1] << 3;
 				ArraytoColor.b = vert.color[2] << 3;
 
-				vertices[j].col =  ArraytoColor.color;
+				out.col =  ArraytoColor.color;
 
-				vertices[j].u = vert.u;
-				vertices[j].v = vert.v;
+				out.u = vert.u;
+				out.v = vert.v;
 
 				__asm__ volatile(				
 					// load vert.x vert.y vert.z vert.w
@@ -381,34 +380,26 @@ public:
 					"sv.s			S001, 4 + %0\n"
 					"sv.s			S002, 8 + %0\n"
 
-					: "+m"(vertices[j].x)
+					: "=m"(out.x)
 					: "m"(vert.x)
 					: "memory"
 				);
-			}
 
+				VIEWPORT viewport;
+				viewport.decode(poly.viewport);
+				out.x *= viewport.width;
+				out.x += viewport.x;
+				out.y *= viewport.height;
+				out.y += viewport.y;
+				out.y = GFX3D_FRAMEBUFFER_HEIGHT - out.y;
+
+				out.x = max(0.0f,min((float)GFX3D_FRAMEBUFFER_WIDTH,out.x));
+				out.y = max(0.0f,min((float)GFX3D_FRAMEBUFFER_HEIGHT,out.y));
+
+			}
 			
-			if (lastPolyAttr != poly.polyAttr)
-			{
-				lastPolyAttr = poly.polyAttr;
-				SetupPoly(poly);
-			}
-
-
-			if (lastTexParams != poly.texParam || lastTexPalette != poly.texPalette)
-			{
-				this->SetupTexture(poly);
-
-				lastTexParams = poly.texParam;
-				lastTexPalette = poly.texPalette;
-			}
-
-			if (skip_poly) 
-				continue;
-			
-			sceGumDrawArray(type, GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_3D, VertSZ, 0, &vertices[vertStartIndex]);
-
-			vertStartIndex += VertSZ;
+			sceGuDrawArray(GUPrimitiveType[poly.vtxFormat], GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, type, 0, &vertices[VertListIndex]);
+			VertListIndex += type;
 		}
 		
 		sceGuFinish();
@@ -441,6 +432,7 @@ static char SoftRastInit(void)
 	rasterizerUnit[0].vertices = (struct Vertex*)sceGuGetMemory(VERTLIST_SIZE * sizeof(struct Vertex));
 	memset(&rasterizerUnit[0].vertices[0], 0, VERTLIST_SIZE * sizeof(struct Vertex));
 	
+
 	rasterizerUnit[0].SLI_MASK = 0;
 	rasterizerUnit[0].SLI_VALUE = 0;
 
@@ -478,18 +470,7 @@ void SoftRasterizerEngine::initFramebuffer(const int width, const int height, co
 
 void SoftRasterizerEngine::updateToonTable()
 {
-	//convert the toon colors
-	for(int i=0;i<32;i++) {
-		#ifdef WORDS_BIGENDIAN
-			u32 u32temp = RGB15TO32_NOALPHA(gfx3d.renderState.u16ToonTable[i]);
-			toonTable[i].r = (u32temp >> 2) & 0x3F;
-			toonTable[i].g = (u32temp >> 10) & 0x3F;
-			toonTable[i].b = (u32temp >> 18) & 0x3F;
-		#else
-			toonTable[i].color = (RGB15TO32_NOALPHA(gfx3d.renderState.u16ToonTable[i])>>2)&0x3F3F3F3F;
-		#endif
-		//printf("%d %d %d %d\n",toonTable[i].r,toonTable[i].g,toonTable[i].b,toonTable[i].a);
-	}
+
 }
 
 void SoftRasterizerEngine::updateFogTable()
@@ -552,7 +533,7 @@ void SoftRasterizerEngine::updateFloatColors()
 SoftRasterizerEngine::SoftRasterizerEngine()
 	: _debug_drawClippedUserPoly(-1)
 {
-	//this->clippedPolys = clipper.clippedPolys = new GFX3D_Clipper::TClippedPoly[POLYLIST_SIZE*2];
+	clipper.clippedPolys = new GFX3D_Clipper::TClippedPoly[POLYLIST_SIZE];
 }
 
 void SoftRasterizerEngine::framebufferProcess()
@@ -593,12 +574,41 @@ void SoftRasterizerEngine::framebufferProcess()
 void SoftRasterizerEngine::performClipping() //bool hirez)
 {
 
+	clipper.reset();
+	const size_t polyCount = polylist->count;
 
+	for (size_t i = 0; i < polyCount; i++)
+	{
+		POLY* poly = &polylist->list[indexlist->list[i]];
+		VERT* verts[4] = {
+			&vertlist->list[poly->vertIndexes[0]],
+			&vertlist->list[poly->vertIndexes[1]],
+			&vertlist->list[poly->vertIndexes[2]],
+			poly->type == 4
+				? &vertlist->list[poly->vertIndexes[3]]
+				: NULL
+		};
+
+		/*int n = poly->type - 1;
+
+		//move that inside the clipper (vfpu? maybe)
+		float facing = (verts[0]->y + verts[n]->y) * (verts[0]->x - verts[n]->x)
+					 + (verts[1]->y + verts[0]->y) * (verts[1]->x - verts[0]->x)
+					 + (verts[2]->y + verts[1]->y) * (verts[2]->x - verts[1]->x);
+
+		for(int j = 2; j < n; j++)
+			facing += (verts[j+1]->y + verts[j]->y) * (verts[j+1]->x - verts[j]->x);
+		
+		poly->backfacing = (facing < 0);*/
+		clipper.clipPoly<false>(poly,verts);
+		//PolyisVisible[i] = (verts[0]->w >= 0 && verts[1]->w >= 0 && verts[2]->w >= 0 && (poly->type == 4 ? verts[3]->w >= 0 : true));
+	}
+
+	clippedPolyCounter = clipper.clippedPolyCounter;
 }
 
 template<bool CUSTOM> void SoftRasterizerEngine::performViewportTransforms(int width, int height)
 {
-
 }
 //these templates needed to be instantiated manually
 template void SoftRasterizerEngine::performViewportTransforms<true>(int width, int height);
@@ -655,25 +665,6 @@ void SetupVertices()
 	}*/
 }
 
-void inline setupPoly() {
-
-	const size_t polyCount = mainSoftRasterizer.polylist->count;
-
-	for (size_t i = 0; i < polyCount; i++)
-	{
-		const POLY* poly = &mainSoftRasterizer.polylist->list[mainSoftRasterizer.indexlist->list[i]];
-		VERT* verts[4] = {
-			&mainSoftRasterizer.vertlist->list[poly->vertIndexes[0]],
-			&mainSoftRasterizer.vertlist->list[poly->vertIndexes[1]],
-			&mainSoftRasterizer.vertlist->list[poly->vertIndexes[2]],
-			poly->type == 4
-				? &mainSoftRasterizer.vertlist->list[poly->vertIndexes[3]]
-				: NULL
-		};
-
-		//PolyisVisible[i] = (verts[0]->w >= 0 && verts[1]->w >= 0 && verts[2]->w >= 0 && (poly->type == 4 ? verts[3]->w >= 0 : true));
-	}
-}
 
 static void SoftRastRender()
 {
@@ -693,6 +684,9 @@ static void SoftRastRender()
 	softRastHasNewData = true;
 
 	//setupPoly();
+
+	mainSoftRasterizer.performClipping();
+	//mainSoftRasterizer.performViewportTransforms<false>(GFX3D_FRAMEBUFFER_WIDTH, GFX3D_FRAMEBUFFER_HEIGHT);
 
 	rasterizerUnit[0].mainLoop<false>(&mainSoftRasterizer);
 }

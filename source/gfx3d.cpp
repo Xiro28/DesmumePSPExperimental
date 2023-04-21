@@ -247,7 +247,7 @@ public:
 //in general we are finding that 3d takes less time than we think....
 //although maybe the true culprit was charging the cpu less time for the dma.
 #define GFX_DELAY(x) NDS_RescheduleGXFIFO(1);
-#define GFX_DELAY_M2(x) NDS_RescheduleGXFIFO(1);
+#define GFX_DELAY_M2(x) NDS_RescheduleGXFIFO(1); 
 
 #define V_GFX_DELAY(x) NDS_RescheduleGXFIFO(x);
 
@@ -2483,41 +2483,29 @@ static void gfx3d_doFlush()
 	//TODO - this _MUST_ be moved later in the pipeline, after clipping.
 	//the w-division here is just an approximation to fix the shop in harvest moon island of happiness
 	//also the buttons in the knights in the nightmare frontend depend on this
-	/*for (int i = 0; i < polycount; i++)
+	/*for(int i=0; i<polycount; i++)
 	{
 		// TODO: Possible divide by zero with the w-coordinate.
 		// Is the vertex being read correctly? Is 0 a valid value for w?
 		// If both of these questions answer to yes, then how does the NDS handle a NaN?
 		// For now, simply prevent w from being zero.
-		POLY& poly = polylist->list[i];
-		//float verty = vertlist->list[poly.vertIndexes[0]].y;
-		float vertz = vertlist->list[poly.vertIndexes[0]].z;
-		//float vertw = (vertlist->list[poly.vertIndexes[0]].w != 0.0f) ? vertlist->list[poly.vertIndexes[0]].w : 0.00000001f;
-	//	verty = 1.0f - (verty + vertw) / (2 * vertw);
-		
-		vertz = 1.f / vertz;
+		POLY &poly = polylist->list[i];
+		float verty = vertlist->list[poly.vertIndexes[0]].y;
+		float vertw = (vertlist->list[poly.vertIndexes[0]].w != 0.0f) ? vertlist->list[poly.vertIndexes[0]].w : 0.00000001f;
+		verty = 1.0f-(verty+vertw)/(2*vertw);
+		poly.miny = poly.maxy = verty;
 
-		//poly.miny = poly.maxy = verty;
-		poly.minz = poly.maxz = vertz;
-
-		for (int j = 1; j < poly.type; j++)
+		for(int j=1; j<poly.type; j++)
 		{
-			//verty = vertlist->list[poly.vertIndexes[j]].y;
-			vertz = vertlist->list[poly.vertIndexes[j]].z;
-
-			//vertw = (vertlist->list[poly.vertIndexes[j]].w != 0.0f) ? vertlist->list[poly.vertIndexes[j]].w : 0.00000001f;
-
-			//verty = 1.0f - (verty + vertw) / (2 * vertw);
-			vertz = 1.f / vertz;
-
-			//poly.miny = min(poly.miny, verty);
-			//poly.maxy = max(poly.maxy, verty);
-			
-			poly.minz = min(poly.minz, vertz);
-			poly.maxz = max(poly.maxz, vertz);
+			verty = vertlist->list[poly.vertIndexes[j]].y;
+			vertw = (vertlist->list[poly.vertIndexes[j]].w != 0.0f) ? vertlist->list[poly.vertIndexes[j]].w : 0.00000001f;
+			verty = 1.0f-(verty+vertw)/(2*vertw);
+			poly.miny = min(poly.miny, verty);
+			poly.maxy = max(poly.maxy, verty);
 		}
 
 	}*/
+
 
 	//we need to sort the poly list with alpha polys last
 	//first, look for opaque polys
@@ -2725,7 +2713,7 @@ void gfx3d_GetLineData15bpp(int line, u16** dst)
 	//TODO - this is not very thread safe!!!
 	/*static u16 buf[GFX3D_FRAMEBUFFER_WIDTH];
 	*dst = buf;
-
+ 
 	u8* lineData;
 	gfx3d_GetLineData(line, &lineData);
 	for(int i=0; i<GFX3D_FRAMEBUFFER_WIDTH; i++)
@@ -2963,27 +2951,72 @@ static FORCEINLINE VERT clipPoint(VERT* inside, VERT* outside, int coord, int wh
 		w_inside = -w_inside;
 	}
 
-
 	t = (coord_inside - w_inside) / ((w_outside - w_inside) - (coord_outside - coord_inside));
-	
 
-#define INTERP(X) ret . X = interpolate(t, inside-> X ,outside-> X )
+	__asm__ volatile(				
+					
+					"lv.s			S000, 0 + %3\n"// load t
+
+					// load coords
+					"lv.q			c020, 0 + %4\n"  //inside coord
+					"lv.q			c030, 0 + %5\n"  //outside coord
+
+					"vsub.q			c010, c030, c020\n"  //outside - inside
+					"vscl.q			c010, c010, S000\n"  //t * (outside - inside)
+					"vadd.q			c010, c020, c010\n"  //ret + t * (outside - inside)
+
+					/*"vadd.s		    S010, S010, S013\n"
+					"vadd.s		    S011, S011, S013\n"
+					"vadd.s		    S012, S012, S013\n"
+
+					// 1/(w*2)
+					"vadd.s		    S003, S013, S013\n"
+					"vrcp.s		    S003, S003\n"
+
+					"vscl.t		    c010, c010, S003\n"*/
+
+					"sv.q			c010, 0 + %0\n"  //ret coord
+
+					// load tex coords
+					"lv.s			S020, 0 + %6\n"  //inside tex
+					"lv.s			S021, 4 + %6\n"  //inside tex
+					"lv.s			S030, 0 + %7\n"  //outside tex
+					"lv.s			S031, 4 + %7\n"  //outside tex
+
+					"vsub.p			c010, c030, c020\n"  //outside - inside
+					"vscl.p			c010, c010, S000\n"  //t * (outside - inside)
+					"vadd.p			c010, c020, c010\n"  //ret + t * (outside - inside)
+
+					"sv.s			S010, 0 + %1\n"  //ret tex
+					"sv.s			S011, 4 + %1\n"  //ret tex
+
+					// load colors
+					"lv.q			c020, 0 + %8\n"  //inside color
+					"lv.q			c030, 0 + %9\n"  //outside color
+
+					"vsub.q			c010, c030, c020\n"  //outside - inside
+					"vscl.q			c010, c010, S000\n"  //t * (outside - inside)
+					"vadd.q			c010, c020, c010\n"  //ret + t * (outside - inside)
+
+					"sv.q			c010, 0 + %2\n"  //ret color
+
+					: "=m"(ret.coord[0]), "=m"(ret.texcoord[0]), "=m"(ret.color[0])
+					: "m"(t), "m"(inside->coord[0]), "m"(outside->coord[0]),
+					  "m"(inside->texcoord[0]), "m"(outside->texcoord[0]), 
+					  "m"(inside->color[0]), "m"(outside->color[0])
+					: "memory"
+	);
+
+
+	/*
+	#define INTERP(X) ret . X = interpolate(t, inside-> X ,outside-> X )
 	
 	INTERP(coord[0]); INTERP(coord[1]); INTERP(coord[2]); INTERP(coord[3]);
 	INTERP(texcoord[0]); INTERP(texcoord[1]);
-
-	//if(CommonSettings.GFX3D_HighResolutionInterpolateColor)
-	/*
-	if(hirez)
-	{
-		INTERP(fcolor[0]); INTERP(fcolor[1]); INTERP(fcolor[2]);
-	}
-	else
-	{
+	INTERP(color[0]); INTERP(color[1]); INTERP(color[2]);
+	
+	ret.color_to_float();
 	*/
-		INTERP(color[0]); INTERP(color[1]); INTERP(color[2]);
-		ret.color_to_float();
-	//}
 
 	//this seems like a prudent measure to make sure that math doesnt make a point pop back out
 	//of the clip volume through interpolation
@@ -3000,7 +3033,7 @@ static FORCEINLINE VERT clipPoint(VERT* inside, VERT* outside, int coord, int wh
 #define MAX_SCRATCH_CLIP_VERTS (4*6 + 40)
 static VERT scratchClipVerts [MAX_SCRATCH_CLIP_VERTS];
 static int numScratchClipVerts = 0;
-
+ 
 template <int coord, int which, class Next>
 class ClipperPlane
 {

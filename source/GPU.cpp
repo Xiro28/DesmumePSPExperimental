@@ -1887,16 +1887,20 @@ int Screen_Init()
 
 void Screen_Reset(void)
 {
+	printf("1\n");
 	GPU_Reset(MainScreen.gpu, 0);
 	GPU_Reset(SubScreen.gpu, 1);
+	printf("1\n");
 	MainScreen.offset = 0;
 	SubScreen.offset = 256;
 
 	volatile u8* buff = GPU_Screen;
 
-	memset((void*)GPU_Screen, 0, sizeof(GPU_Screen));
-	for (int i = 0; i < (256 * 192 * 4); i++)
-		*(buff++) = 0x7FFF;
+	printf("1\n");
+
+	memset((void*)GPU_Screen, 0x7FFF, sizeof(GPU_Screen));
+
+	printf("1\n");
 
 
 	//fast_memset((void*)&_screen[0], 0, sizeof(_screen));
@@ -2635,7 +2639,7 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 		if (l == 191) { disp_fifo.head = disp_fifo.tail = 0; }
 	}else
 		//render mouse
-		if (my_config.cur && l == 190) {
+		if (my_config.cur && l == 191) {
 			int X = mouse.x << 1;
 			for (u16 yy = 0;yy < 5 && (yy+ mouse.y) < 190;++yy){
 				u8* framebuf = (u8*)(ME_GPU_Screen + 512)+psp_addrScreenLine[mouse.y +yy];//(u8*)(screen->gpu->currDst) /*+ (mouse.y) * 1024)*/; //GetFrameBuffer() + ((yy + y) * 1024);
@@ -2646,11 +2650,11 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 			}
 		}
 
-	GPU_RenderLine_MasterBrightness(screen, l);
 
-	if (l == 191 && (gpu->core == GPU_MAIN)) {
-		memcpy((void*)GPU_Screen, (void*)ME_GPU_Screen, 192 * 256 * 4);
+	if (l == 191) {
+		memcpy((void*)&GPU_Screen[(gpu->core == GPU_MAIN) ? 0 : 192 * 256 * 2], (void*)&ME_GPU_Screen[(gpu->core == GPU_MAIN) ? 0 : 192 * 256 * 2], 192 * 256 * 2);
 	}
+	GPU_RenderLine_MasterBrightness(screen, l);
 
 	
 }

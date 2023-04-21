@@ -9,6 +9,7 @@ OBJS = $(SRCDIR)/arm_instructions.o \
 $(SRCDIR)/arm_jit.o \
 $(SRCDIR)/armcpu.o \
 $(SRCDIR)/bios.o \
+$(SRCDIR)/blockdecoder.o \
 $(SRCDIR)/common.o \
 $(SRCDIR)/cp15.o \
 $(SRCDIR)/debug.o \
@@ -92,9 +93,10 @@ CXX=psp-g++
 PSPSDK = $(shell psp-config --pspsdk-path)
 PSPDEV = $(shell psp-config -d)
 
-CFLAGS = -O2 -DNOPRINTF -finline-functions -fno-rtti -ffast-math -fweb -fomit-frame-pointer  -G0 -Wall -D PSP -D NOSSE2 -D HAVE_LIBZ -funsigned-char -Wall \
-                  -fstrict-aliasing -falign-functions=16 \
-                  -falign-loops -falign-labels -falign-jumps -faligned-new -D HAVE_JIT
+CFLAGS = -O3 -DNOPRINTF -finline-functions -fno-rtti -ffast-math -fweb   -G0 -Wall -D PSP -D NOSSE2 -D HAVE_LIBZ -funsigned-char -Wall \
+                  -fstrict-aliasing -falign-functions \
+                  -falign-loops -falign-labels -falign-jumps -faligned-new -D HAVE_JIT \
+                  -fcall-saved-s0 -fcall-saved-s1 -fcall-saved-s2 -fcall-saved-s3 -fcall-saved-s4 
 
 
 CXXFLAGS = $(CFLAGS) -fexceptions
@@ -104,8 +106,8 @@ ASFLAGS = $(CFLAGS)
 INCDIR =  ./libs/include
 
 LIBDIR = ./libs/lib
-LIBS  =  -lME -ldynarec -lintrafont -lpspdmac -lpspaudiocodec -lpspmath -lpsppower -lglut -lpspgum  -lfreetype -lpng -lz  -lm -lpspgu -lpsphprm -lpspaudio -lstdc++ -lpspvfpu -lpsprtc
-LIBS += -lpspaudiolib -lpspvram  -lpspsdk -lpng
+LIBS  =   -lME -ldynarec -lintrafont -lpspdmac -lpspaudiocodec -lpspmath -lpsppower -lglut -lpspgum  -lfreetype -lpng -lz  -lm -lpspgu -lpsphprm -lpspaudio -lstdc++ -lpspvfpu -lpsprtc
+LIBS += -lpspaudiolib -lpspvram  -lpspsdk -lpng -lm 
 
 EXTRA_TARGETS = EBOOT.PBP
 PSP_EBOOT_TITLE = Desmume

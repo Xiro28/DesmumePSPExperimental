@@ -247,7 +247,7 @@ void GFX_FIFOsend(u8 cmd, u32 param)
 
 	GXF_FIFO_handleEvents();
 
-	NDS_RescheduleGXFIFO(1);
+	NDS_RescheduleGXFIFO(1); 
 }
 
 // this function used ONLY in gxFIFO

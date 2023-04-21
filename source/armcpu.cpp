@@ -242,10 +242,7 @@ void armcpu_t::changeCPSR()
 
 void armcpu_init(armcpu_t *armcpu, u32 adr)
 {
-#if defined(_M_X64) || defined(__x86_64__)
-	memcpy(&armcpu->cond_table[0], &arm_cond_table[0], sizeof(arm_cond_table));
-#endif
-
+	//memcpy(&armcpu->cond_table[0], &arm_cond_table[0], sizeof(arm_cond_table));
 	//J_Init(false);
 	
 	armcpu->LDTBit = (armcpu->proc_ID==0); //set ARMv5 style bit--different for each processor
@@ -281,6 +278,8 @@ void armcpu_init(armcpu_t *armcpu, u32 adr)
 	//do something sensible when booting up to a thumb address
 	armcpu->next_instruction = adr & ~1;
 	armcpu->CPSR.bits.T = BIT0(adr);
+
+	armcpu->MAIN_MEM = MMU.MAIN_MEM;
 	
 //#ifndef GDB_STUB
 	_armcpu_prefetch(armcpu);
@@ -401,7 +400,7 @@ u32 armcpu_Wait4IRQ(armcpu_t *cpu)
 	cpu->freeze = (CPU_FREEZE_WAIT_IRQ | CPU_FREEZE_IE_IF);
 	return 1;
 }
- 
+  
 template<u32 PROCNUM>
 FORCEINLINE static u32 armcpu_prefetch()
 {

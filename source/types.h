@@ -82,7 +82,7 @@ template<typename T> inline void reconstruct(T* t) {
 #if defined(_MSC_VER)
 #define FORCEINLINE __forceinline
 #else
-#define FORCEINLINE INLINE
+#define FORCEINLINE inline __attribute__((always_inline))
 #endif
 #endif
 

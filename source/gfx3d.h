@@ -276,6 +276,7 @@ struct POLY {
 	int type; //tri or quad
 	//int typeGU; //tri or quad
 	u32 polyAttr, texParam, texPalette; //the hardware rendering params
+	bool backfacing;
 	u32 viewport;
 	float miny, maxy;
 	float minz, maxz;
@@ -552,6 +553,10 @@ struct VERT {
 			float u,v;
 		};
 	} CACHE_ALIGN;
+
+	u8 color[4];
+	float fcolor[4];
+
 	void set_coord(float x, float y, float z, float w) { 
 		this->x = x; 
 		this->y = y; 
@@ -564,10 +569,7 @@ struct VERT {
 		z = coords[2];
 		w = coords[3];
 	}
-	float fcolor[3];
-	u8 color[3];
-
-
+	
 	void color_to_float() {
 		fcolor[0] = color[0];
 		fcolor[1] = color[1];
@@ -756,10 +758,6 @@ extern CACHE_ALIGN const u8 material_5bit_to_8bit[32];
 extern CACHE_ALIGN const u8 material_3bit_to_5bit[8];
 extern CACHE_ALIGN const u8 material_3bit_to_6bit[8];
 extern CACHE_ALIGN const u8 material_3bit_to_8bit[8];
-
-//these contain the 3d framebuffer converted into the most useful format
-//they are stored here instead of in the renderers in order to consolidate the buffers
-extern CACHE_ALIGN u8 gfx3d_convertedAlpha[GFX3D_FRAMEBUFFER_WIDTH*GFX3D_FRAMEBUFFER_HEIGHT*2]; //see cpp for explanation of illogical *2
 
 extern BOOL isSwapBuffers;
 

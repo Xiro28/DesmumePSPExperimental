@@ -79,8 +79,6 @@ public:
 	void performBackfaceTests();
 	void setupTextures(const bool skipBackfacing);
 
-	FragmentColor toonTable[32];
-	u8 fogTable[32768];
 	GFX3D_Clipper clipper;
 	GFX3D_Clipper::TClippedPoly * clippedPolys;
 	int clippedPolyCounter;

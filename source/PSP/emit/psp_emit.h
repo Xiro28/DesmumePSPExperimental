@@ -873,19 +873,12 @@ typedef enum
 //  | lui rt, immediate
 #define emit_lui(_rt, _imm) emit_imm(lui, 0, _rt, _imm)
 
-#define fitsInShort(x) (((int16_t)x) == (x))
+inline bool is_s8(u32 v) { return (s8)v==(s32)v; }
+inline bool is_u8(u32 v) { return (u8)v==(s32)v; }
+inline bool is_s16(u32 v) { return (s16)v==(s32)v; }
+inline bool is_u16(u32 v) { return (u16)v==(u32)v; }
 
-#define psp_imm16_hi(x) ((x) >> 16)
-#define psp_imm16_lo(x) ((x) & 0xffff)
-
-#define emit_li(_rt, _imm) \
-	if (fitsInShort(_imm)) { \
-		emit_addiu(_rt, psp_zero, _imm); \
-	} else { \
-		emit_lui(_rt, psp_imm16_hi(_imm)); \
-		emit_ori(_rt, _rt, psp_imm16_lo(_imm)); \
-	}
-
+void emit_li(u32 reg,u32 data,u32 sz);
 //  | j label
 #define emit_j(_target) emit_jump(j, psp_absolute_target(_target))
 //  | jal label
