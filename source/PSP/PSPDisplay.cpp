@@ -55,29 +55,6 @@ struct DispVertex {
 	signed short x, y, z;
 };
 
-static void blit_sliced(int sx, int sy, int sw, int sh, int dx, int dy /*, int SLICE_SIZE*/) {
-	int start, end;
-	// blit maximizing the use of the texture-cache
-	for (start = sx, end = sx + sw; start < end; start += SLICE_SIZE, dx += SLICE_SIZE) {
-		struct DispVertex* vertices = (struct DispVertex*)sceGuGetMemory(2 * sizeof(struct DispVertex));
-		int width = (start + SLICE_SIZE) < end ? SLICE_SIZE : end - start;
-
-		vertices[0].u = start;
-		vertices[0].v = sy;
-		vertices[0].x = dx;
-		vertices[0].y = dy;
-		vertices[0].z = 0;
-
-		vertices[1].u = start + width;
-		vertices[1].v = sy + sh;
-		vertices[1].x = dx + width;
-		vertices[1].y = dy + sh;
-		vertices[1].z = 0;
-
-		sceGuDrawArray(GU_SPRITES, TEXTURE_FLAGS, 2, NULL, vertices);
-	}
-}
-
 class Icon {
 
 public:
@@ -213,9 +190,58 @@ void SetupDisp_EMU() {
 	sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
 
+const float sw = 511;
+static const int scale = (int)(sw * (float)SLICE_SIZE) / (float)512;
+struct DispVertex* screen_gpuvtx;
+
+void DrawSliced(int dx){
+
+    for (int start = 0, end = sw, idx = 0; start < end; start += SLICE_SIZE, dx += scale) {
+		int width = (start + SLICE_SIZE) < end ? SLICE_SIZE : end - start;
+
+		screen_gpuvtx[idx].u = start;
+		screen_gpuvtx[idx].v = 0;
+		screen_gpuvtx[idx].x = dx;
+		screen_gpuvtx[idx].y = 40;
+		screen_gpuvtx[idx++].z = 0;
+
+		screen_gpuvtx[idx].u = start + width;
+		screen_gpuvtx[idx].v = 192;
+		screen_gpuvtx[idx].x = dx + scale;
+		screen_gpuvtx[idx].y = 192 + 40;
+		screen_gpuvtx[idx++].z = 0;
+
+		sceGuDrawArray(GU_SPRITES, TEXTURE_FLAGS, 2, NULL, &screen_gpuvtx[idx-2]);
+  }
+}
+
 void EMU_SCREEN() {
+	/*switch (type){
+
+	}
 	static const int sz_SCR = 256 * 192 * 4;
-	sceDmacMemcpy(DISP_POINTER, (const void*)&GPU_Screen, sz_SCR);
+	sceDmacMemcpy(DISP_POINTER, (const void*)&GPU_Screen, sz_SCR);*/
+	
+	sceGuSync(0, 0);
+	sceGuStart(GU_DIRECT, gulist);
+
+	sceGuDrawBuffer(GU_PSM_5551, frameBuffer, GU_VRAM_WIDTH);
+
+	sceGuClearColor(0);
+	sceGuClearDepth(0);
+	sceGuClearStencil(0);
+
+	sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT | GU_STENCIL_BUFFER_BIT);
+
+	sceGuEnable(GU_TEXTURE_2D);
+
+	sceGuTexMode(GU_PSM_5551, 0, 0, 0);
+	sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGB);
+    sceGuTexImage(0, 512, 256, 512, (const void*)&GPU_Screen[0]);
+
+	DrawSliced(0);
+
+	sceGuFinishId(0);
 }
 
 
@@ -257,7 +283,7 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 
 	// Enable clamped rgba texture mode
 	sceGuTexWrap(GU_CLAMP, GU_CLAMP);
-	sceGuTexMode(GU_PSM_5551, 0, 1, 0);
+	sceGuTexMode(GU_PSM_5551, 0, 0, 0);
 	sceGuEnable(GU_TEXTURE_2D);
 
 	// Enable modulate blend mode 
@@ -281,6 +307,8 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 
 	if (inited) return;
 	inited = true;
+
+	screen_gpuvtx = (struct DispVertex*)sceGuGetMemory(2 * SLICE_SIZE * sizeof(struct DispVertex));
 
 	static const char* font = "flash0:/font/ltn1.pgf"; //small font
 	static const char* font2 = "flash0:/font/ltn0.pgf"; //small font

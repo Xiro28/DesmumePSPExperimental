@@ -4,6 +4,8 @@
 #include "PSP/emit/psp_emit.h"
 #include "armcpu.h"
 
+#include "Disassembler.h"
+
 #include <functional>
 
 bool instr_does_prefetch(u32 opcode);
@@ -821,7 +823,7 @@ void emitThumbOP(opcode& op){
                 psp_gpr_t rs2 = reg_alloc.getReg(op.rs2, psp_a1);
                 emit_addu(dst, rs1, rs2);
             }
-        
+          
             if (!op.extra_flags&EXTFL_NOFLAGS){
                 emit_jal(set_and_flags);
                 if (dst == psp_v0)  storeReg(psp_v0, op.rd); else emit_move(psp_v0, dst);  
@@ -1125,6 +1127,16 @@ bool block::emitThumbBlock(){
 
     //printf("0x%X\n", emit_getCurrAdr()); 
 
+   /* printf("---------------------------------\n");
+
+    printf("BLOCK %s INFO: N ops: %d \n", block_hash, opcodes.size());
+
+    for (int i = 1; i <= 16; ++i){
+        printf("R%d: used %d times\n", i-1, reg_usage[i]);
+    }*/
+
+    char dasmbuf[1024] = {0};
+
 
     reg_alloc.reset(); 
 
@@ -1132,7 +1144,7 @@ bool block::emitThumbBlock(){
         opcode op = opcodes.front();
 
         emit_li(psp_fp, op.op_pc + 2);
-        emit_sw(psp_fp, psp_k0, _next_instr);
+        emit_sw(psp_fp, psp_k0, _next_instr); 
 
         emit_addiu(psp_at, psp_fp, 2);
         emit_sw(psp_at, psp_k0, _R15);
@@ -1142,6 +1154,10 @@ bool block::emitThumbBlock(){
         emitThumbOP<PROCNUM>(op);
 
         if (op._op != OP_ITP) store_flags();
+
+        /*if (onlyITP) {
+            printf("%s \n",des_thumb_instructions_set[op.rs1 >>6](op.op_pc, op.rs1, dasmbuf));
+        }*/
   
         return false;  
     }else

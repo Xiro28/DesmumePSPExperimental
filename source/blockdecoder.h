@@ -159,28 +159,39 @@ class block{
     public:
 
         void init(){
+            clearBlock();
             printf("block created\n");
         }
 
         void addOP(op _op, uint32_t pc, uint32 rd = -1, uint32 rs1 = -1, uint32 rs2 = -1, uint32 imm = -1, opType preOpType = PRE_OP_NONE, uint32_t condition = -1, uint32_t extra_flags = EXTFL_SAVECOND){
-            /*if (rd  < 16) reg_usage[rd  + 1] += 1;
-            if (rs1 < 16) reg_usage[rs1 + 1] += 1;
-            if (rs2 < 16) reg_usage[rs2 + 1] += 1;*/
-
-             if ((_op >= OP_CMP && _op != OP_SWI) || condition != -1) uses_flags = true;
+            
+            if ((_op >= OP_CMP && _op != OP_SWI) || condition != -1) uses_flags = true;
 
             opcodes.push_back(opcode(_op, rd, rs1, rs2, imm, preOpType, pc, condition, extra_flags));
+
+            if (_op == OP_ITP || _op == OP_SWI) return;
+            
+            onlyITP = false;
+
+            if (rd  < 16) reg_usage[rd  + 1] += 1;
+            if (rs1 < 16) reg_usage[rs1 + 1] += 1;
+            if (rs2 < 16) reg_usage[rs2 + 1] += 1;
         }
 
         void clearBlock(){
-            if (opcodes.size() == 0) return;
 
-            opcodes.clear();
             block_hash[0] = '\0';
-            /*for (int i = 0; i < 16; ++i){
+
+            onlyITP = true;
+            
+            for (int i = 0; i < 16; ++i){
                 reg_usage[i + 1] = 0;
-            }*/
+            }
+
+            if (opcodes.size() > 0) opcodes.clear();
         }
+
+        u32 getNOpcodes() { return opcodes.size(); }
 
         template<int PROCNUM>
         bool emitArmBlock();
@@ -197,6 +208,7 @@ class block{
         bool noReadWriteOP = true;
         bool uses_flags = false;
         bool manualPrefetch = false;
+        bool onlyITP = true;
 
         u32 branch_addr = 0;
         u32 start_addr = 0;

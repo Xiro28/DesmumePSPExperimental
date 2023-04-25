@@ -1563,15 +1563,15 @@ static u32 compile_basicblock()
 				reg_gpr+psp_fp,
 				reg_gpr+psp_ra);
    
-   if (thumb)
+   if (thumb && (!currentBlock.onlyITP || currentBlock.getNOpcodes() > 1)) 
       emit_mpush(5,
                reg_gpr+psp_s0,
                reg_gpr+psp_s1,
                reg_gpr+psp_s2,
-               reg_gpr+psp_s3,
-               reg_gpr+psp_s4);
+               reg_gpr+psp_s3, 
+               reg_gpr+psp_s4); 
 
-   StartCodeDump();
+   //StartCodeDump();
 
    emit_li(psp_k0,((u32)&ARMPROC), 2);
 
@@ -1596,7 +1596,7 @@ static u32 compile_basicblock()
       emit_sw(psp_at, RCPU, _instr_adr);
    }
 
-   if (thumb)
+   if (thumb && (!currentBlock.onlyITP || currentBlock.getNOpcodes() > 1)) 
       emit_mpop(5,
                reg_gpr+psp_s0,
                reg_gpr+psp_s1,
