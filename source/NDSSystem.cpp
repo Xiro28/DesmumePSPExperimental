@@ -1715,6 +1715,8 @@ void NDS_exec(s32 nb)
 		}
 	}
 
+	executeARM7Stuff();
+
 	EMU_SCREEN();
 	
 	if (PSP_UC(RenderDone)){
@@ -2496,11 +2498,6 @@ static void NDS_applyFinalInput()
 	padExt |= (((u16 *)MMU.ARM7_REG)[0x136>>1] & 0x0070);
 	
 	((u16 *)MMU.ARM7_REG)[0x136>>1] = (u16)padExt;
-
-	extern u16 get_keypad();
-	//printf("padExt: %04X\n", get_keypad());
-
-	_MMU_write16<ARMCPU_ARM7>(0x027FFFA8, get_keypad());
 
 	//InputDisplayString=MakeInputDisplayString(padExt, pad);
 

@@ -511,90 +511,8 @@ static INSTR_R ARM_OP_MUL(uint32_t pc, const u32 i)
    return DYNAREC; 
 } 
 
-<<<<<<< Updated upstream
-#define ARM_ALU_OP_DEF(T, D, N, S) \
-   static const ArmOpCompiler ARM_OP_##T##_LSL_IMM = ARM_OP_PATCH<N, D, 0, 1, S, 1>; \
-   static const ArmOpCompiler ARM_OP_##T##_LSL_REG = ARM_OP_PATCH<N, D, 1, 1, S, 2>; \
-   static const ArmOpCompiler ARM_OP_##T##_LSR_IMM = ARM_OP_PATCH<N, D, 0, 1, S, 1>; \
-   static const ArmOpCompiler ARM_OP_##T##_LSR_REG = ARM_OP_PATCH<N, D, 1, 1, S, 2>; \
-   static const ArmOpCompiler ARM_OP_##T##_ASR_IMM = ARM_OP_PATCH<N, D, 0, 1, S, 1>; \
-   static const ArmOpCompiler ARM_OP_##T##_ASR_REG = ARM_OP_PATCH<N, D, 1, 1, S, 2>; \
-   static const ArmOpCompiler ARM_OP_##T##_ROR_IMM = ARM_OP_PATCH<N, D, 0, 1, S, 1>; \
-   static const ArmOpCompiler ARM_OP_##T##_ROR_REG = ARM_OP_PATCH<N, D, 1, 1, S, 2>; \
-   static const ArmOpCompiler ARM_OP_##T##_IMM_VAL = ARM_OP_PATCH<N, D, 0, 0, S, 1>
-
-ARM_ALU_OP_DEF(AND_S, 2, 1, true);
-ARM_ALU_OP_DEF(EOR_S, 2, 1, true);
-ARM_ALU_OP_DEF(SUB_S, 2, 1, true);
-ARM_ALU_OP_DEF(RSB_S, 2, 1, true);
-ARM_ALU_OP_DEF(ADD_S, 2, 1, true);
-ARM_ALU_OP_DEF(ADC_S, 2, 1, true);
-ARM_ALU_OP_DEF(SBC_S, 2, 1, true);
-ARM_ALU_OP_DEF(RSC_S, 2, 1, true);
-ARM_ALU_OP_DEF(TEQ  , 0, 1, true);
-ARM_ALU_OP_DEF(CMN  , 0, 1, true);
-ARM_ALU_OP_DEF(ORR_S, 2, 1, true);
-ARM_ALU_OP_DEF(MOV_S, 2, 0, true);
-ARM_ALU_OP_DEF(BIC_S, 2, 1, true);
-ARM_ALU_OP_DEF(MVN_S, 2, 0, true);
-
-static void MUL_Mxx_END(bool sign, int cycles)
-{
-	if(sign)
-	{
-      emit_move(psp_at, psp_a1);
-      emit_sra(psp_a1, psp_a1, 31);
-      emit_xor(psp_a1, psp_a1, psp_at);
-	}
-
-   emit_ori(psp_a1, psp_a1, 1);
-
-   emit_clz(RCYC, psp_a1);
-   emit_srl(RCYC, RCYC, 3);
-   emit_addiu(RCYC, RCYC, cycles+1);
-}
-
-static OP_RESULT ARM_OP_MUL(uint32_t pc, const u32 i) {
-
-   sync_r15(i, false, 0);
-
-   emit_lw(psp_a0,RCPU,_reg_pos(0));
-   emit_lw(psp_a1,RCPU,_reg_pos(8));
-
-   emit_mult(psp_a0,psp_a1);
-
-   emit_mflo(psp_a0);
-   emit_sw(psp_a0,RCPU,_reg_pos(16));
-
-   MUL_Mxx_END(1, 3);
-
-   return OPR_RESULT(OPR_CONTINUE, 5);
-}
-
-static OP_RESULT ARM_OP_MLA(uint32_t pc, const u32 i) {
-
-   sync_r15(i, false, 0);
-
-   emit_lw(psp_a0,RCPU,_reg_pos(0));
-   emit_lw(psp_a1,RCPU,_reg_pos(8));
-
-   emit_mult(psp_a0,psp_a1);
-
-   emit_mflo(psp_a0);
-
-   emit_lw(psp_a2,RCPU,_reg_pos(12));
-
-   emit_addu(psp_a0,psp_a0,psp_a2);
-
-   emit_sw(psp_a0,RCPU,_reg_pos(16));
-
-   MUL_Mxx_END(1, 4);
-
-   return OPR_RESULT(OPR_CONTINUE, 5);
-=======
 static INSTR_R ARM_OP_MLA(uint32_t pc, const u32 i) {
    return INTERPRET;
->>>>>>> Stashed changes
 }
 
 
@@ -1608,110 +1526,12 @@ static u32 compile_basicblock()
 
    emit_li(psp_k0,((u32)&ARMPROC), 2);
 
-<<<<<<< Updated upstream
-   //printf("\n\nStart\n\n");
-   for (uint32_t i = 0, has_ended = 0; has_ended == 0; i ++, pc += isize, n_ops++){
-
-      opcode = thumb ? _MMU_read16<PROCNUM, MMU_AT_CODE>(pc&imask) : _MMU_read32<PROCNUM, MMU_AT_CODE>(pc&imask);
-      has_ended = instr_is_branch(opcode) || (i >= (my_config.DynarecBlockSize - 1));
-
-      if (interpreted){
-         emit_lui(psp_gp, pc >> 16);
-         emit_ori(psp_gp, psp_gp, pc &0xffff);
-      }else
-         emit_addiu(psp_gp, psp_gp, isize);
-      
-      if (thumb){
-
-         ArmOpCompiler fc = thumb_instruction_compilers[opcode>>6];
-               
-
-         if (fc){ 
-            int result = fc(pc,opcode);
-
-            if (result != OPR_INTERPRET){
-               interpreted = false;
-               interpreted_cycles += op_decode[PROCNUM][true]();
-               continue;
-            }
-         }
-         
-         interpreted = true;
-
-         emit_prefetch(); 
-
-        // printf("%s \n",des_thumb_instructions_set[opcode>>6](pc, opcode, dasmbuf)); 
-
-         emit_jal(thumb_instructions_set[PROCNUM][opcode>>6]);
-
-         if (opcode == 0) emit_move(psp_a0,psp_zero); 
-         else if (opcode != 0) emit_movi(psp_a0,opcode&0xFFFF); 
-      }
-      else{ 
-
-         const bool conditional = instr_is_conditional(opcode);
-         u32 addr_cond = 0;
-
-         /*skip_load = bblock_optmizer[i].skipL;
-         skip_save = bblock_optmizer[i].skipS;
-
-         if (skip_load || skip_save){
-            //printf("HJhjhjhjjhjhjhj\n");
-         }*/
-
-         if (conditional)
-            addr_cond = emit_Halfbranch(CONDITION(opcode),opcode,has_ended);
-
-            u32 Istart_adr = emit_getPointAdr();
-
-            ArmOpCompiler fc = arm_instruction_compilers[INSTRUCTION_INDEX(opcode)];
-
-            if (fc){ 
-               int result = fc(pc,opcode);
-
-               if (result != OPR_INTERPRET){
-                  u32 skip_sz = (emit_getPointAdr() - Istart_adr) + 8;
-                  
-                  if (conditional) CompleteCondition(CONDITION(opcode),addr_cond,emit_getCurrAdr() + skip_sz);
-
-                  interpreted = false;
-                  interpreted_cycles += op_decode[PROCNUM][false]();
-                  continue;
-               }
-            }
-
-         if (conditional){
-
-            u32 skip_sz     =  28;                        //Jump + Prefetch + bne/beq
-                skip_sz    +=  ((opcode == 0) ? 4 : 8);   // Opcode
-
-            CompleteCondition(CONDITION(opcode),addr_cond,emit_getCurrAdr() + skip_sz);
-         }
-
-         emit_prefetch();
-
-         if (opcode != 0) emit_lui(psp_at,opcode>>16);
-
-         interpreted_op++;
-
-            /* printf(des_arm_instructions_set[INSTRUCTION_INDEX(opcode)](pc, opcode, dasmbuf));*/
-
-         emit_jal(arm_instructions_set[PROCNUM][INSTRUCTION_INDEX(opcode)]);
-         if (opcode != 0) { emit_ori(psp_a0,psp_at,opcode&0xFFFF); } else emit_move(psp_a0,psp_zero);
-
-         interpreted = true;
-      }
-
-      interpreted_cycles += op_decode[PROCNUM][thumb]();
-      old_opcode = opcode;
-=======
    if (thumb){
       if (currentBlock.emitThumbBlock<PROCNUM>()) //idle loop
          interpreted_cycles *= 1;
    }else{
       if (currentBlock.emitArmBlock<PROCNUM>()) //idle loop
          interpreted_cycles *= 1;
->>>>>>> Stashed changes
    }
 
    /*if (strcmp(">:1:03:228FFE20:8DA0D787:049532BF:1CCCFF37:46FE1542", currentBlock.block_hash) == 0) {

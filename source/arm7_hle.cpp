@@ -12,6 +12,7 @@ u16 IPCFIFOCnt9, IPCFIFOCnt7;
 namespace Sound_Nitro{
     extern void OnIPCRequest(u32 data);
     extern void Reset();
+    extern void Process(u32 param);
 }
 
 u32 SM_Command;
@@ -688,6 +689,12 @@ void StartScanline(u32 line)
             break;
         }
     }
+}
+
+void executeARM7Stuff(){
+    extern u16 get_keypad();
+	_MMU_write16<ARMCPU_ARM7>(0x027FFFA8, get_keypad());
+    Sound_Nitro::Process(1);
 }
 
 void HLE_IPCSYNC(){

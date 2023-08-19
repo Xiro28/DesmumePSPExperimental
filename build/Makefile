@@ -95,16 +95,10 @@ CXX=psp-g++
 PSPSDK = $(shell psp-config --pspsdk-path)
 PSPDEV = $(shell psp-config -d)
 
-<<<<<<< Updated upstream
-CFLAGS = -O2 -DNOPRINTF -finline-functions -fno-rtti -ffast-math -fweb -fomit-frame-pointer  -G0 -Wall -D PSP -D NOSSE2 -D HAVE_LIBZ -funsigned-char -Wall \
-                  -fstrict-aliasing -falign-functions=16 \
-                  -falign-loops -falign-labels -falign-jumps -faligned-new -D HAVE_JIT
-=======
 CFLAGS = -O3 -DNOPRINTF -finline-functions -fno-rtti -ffast-math -fweb -g  -G0 -Wall -D PSP -D NOSSE2 -D HAVE_LIBZ -funsigned-char -Wall \
                   -fstrict-aliasing -falign-functions \
                   -falign-loops -falign-labels -falign-jumps -faligned-new -D HAVE_JIT \
                   -fcall-saved-s0 -fcall-saved-s1 -fcall-saved-s2 -fcall-saved-s3 -fcall-saved-s4 
->>>>>>> Stashed changes
 
 
 CXXFLAGS = $(CFLAGS) -fexceptions

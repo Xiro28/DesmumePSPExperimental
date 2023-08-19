@@ -16,3 +16,5 @@ void HLE_Reset();
 void HLE_IPCSYNC();
 
 void StartScanline(u32 line);
+
+void executeARM7Stuff();
