@@ -70,20 +70,7 @@
 static const char* DESMUME_BACKUP_FOOTER_TXT = "|<--Snip above here to create a raw sav by excluding this DeSmuME savedata footer:";
 static const char* kDesmumeSaveCookie = "|-DESMUME SAVE-|";
 
-static const u32 saveSizes[] = {512,			// 4k
-								8*1024,			// 64k
-								32*1024,		// 512k
-								64*1024,		// 1Mbit
-								256*1024,		// 2Mbit
-								512*1024,		// 4Mbit
-								1024*1024,		// 8Mbit
-								2048*1024,		// 16Mbit
-								4096*1024,		// 32Mbit
-								8192*1024,		// 64Mbit
-								16384*1024,		// 128Mbit
-								32768*1024,		// 256Mbit
-								65536*1024,		// 512Mbit
-								0xFFFFFFFF};
+
 static const u32 saveSizes_count = ARRAY_SIZE(saveSizes);
 
 //the lookup table from user save types to save parameters

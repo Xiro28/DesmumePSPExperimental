@@ -25,7 +25,7 @@
 #include "types.h"
 
 
-#define WORDS_BIGENDIAN 1
+//#define WORDS_BIGENDIAN 0
 
 //this was originally declared in MMU.h but we suffered some organizational problems and had to remove it
 enum MMU_ACCESS_TYPE
@@ -109,8 +109,8 @@ static INLINE void T1WriteWord(u8* const mem, const u32 addr, const u16 val)
 #else
 
 	//HCF PRUEBA
-	mem[addr + 1] = (u8)(val >> 8);
-   mem[addr] = (u8)(val & 0xFF);
+	//mem[addr + 1] = (u8)(val >> 8);
+   //mem[addr] = (u8)(val & 0xFF);
 	/*
 	mem[addr] = (u8)(val >> 8);
    mem[addr + 1] = (u8)(val & 0xFF);
@@ -119,7 +119,7 @@ static INLINE void T1WriteWord(u8* const mem, const u32 addr, const u16 val)
 	mem[addr] = val >> 8;
    mem[addr + 1] = val & 0xFF;
    */
-   //*((u16 *) (mem + addr)) = val;
+   *((u16 *) (mem + addr)) = val;
 #endif
 }
 
@@ -133,7 +133,7 @@ static INLINE void T1WriteLong(u8* const mem, const u32 addr, const u32 val)
 #else
 
 //HCF PRUEBA
-	mem[addr + 3] = (u8)(val >> 24);
+	/*mem[addr + 3] = (u8)(val >> 24);
    mem[addr + 2] = (u8)((val >> 16) & 0xFF);
    mem[addr + 1] = (u8)((val >> 8) & 0xFF);
    mem[addr] = (u8)(val & 0xFF);
@@ -149,7 +149,7 @@ static INLINE void T1WriteLong(u8* const mem, const u32 addr, const u32 val)
    mem[addr + 2] = (val >> 8) & 0xFF;
    mem[addr + 3] = val & 0xFF;
 	*/
-   ////  *((u32 *) (mem + addr)) = val;
+    *((u32 *) (mem + addr)) = val;
 
 
 #endif

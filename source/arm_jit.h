@@ -44,19 +44,14 @@ struct JIT_struct
 	uintptr_t ARM7_WIRAM[0x10000/2];
 	uintptr_t ARM7_WRAM[0x40000/2];
 
-	static uintptr_t *JIT_MEM[2][0x4000];
-};
-
-struct optimiz{
-	bool skipL = false;
-	bool skipS = false;
+	static uintptr_t *JIT_MEM[0x4000];
 };
 
 extern CACHE_ALIGN JIT_struct JIT;
-#define JIT_COMPILED_FUNC(adr, PROCNUM) JIT.JIT_MEM[PROCNUM][((adr)&0x0FFFC000)>>14][((adr)&0x00003FFE)>>1]
-#define JIT_COMPILED_FUNC_PREMASKED(adr, PROCNUM, ofs) JIT.JIT_MEM[PROCNUM][(adr)>>14][(((adr)&0x00003FFE)>>1)+ofs]
+#define JIT_COMPILED_FUNC(adr, PROCNUM) JIT.JIT_MEM[((adr)&0x0FFFC000)>>14][((adr)&0x00003FFE)>>1]
+#define JIT_COMPILED_FUNC_PREMASKED(adr, PROCNUM, ofs) JIT.JIT_MEM[(adr)>>14][(((adr)&0x00003FFE)>>1)+ofs]
 #define JIT_COMPILED_FUNC_KNOWNBANK(adr, bank, mask, ofs) JIT.bank[(((adr)&(mask))>>1)+ofs]
-#define JIT_MAPPED(adr, PROCNUM) JIT.JIT_MEM[PROCNUM][(adr)>>14]
+#define JIT_MAPPED(adr, PROCNUM) JIT.JIT_MEM[(adr)>>14]
 
 extern u32 saveBlockSizeJIT;
 

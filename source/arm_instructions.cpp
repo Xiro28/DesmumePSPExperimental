@@ -6297,15 +6297,11 @@ TEMPLATE static u32 FASTCALL  OP_CDP(const u32 i)
 //   The End
 //-----------------------------------------------------------------------------
 
-const OpFunc arm_instructions_set[2][4096] = {{
+const OpFunc arm_instructions_set[4096] = {
 #define TABDECL(x) x<0>
 #include "instruction_tabdef.inc"
 #undef TABDECL
-},{
-#define TABDECL(x) x<1>
-#include "instruction_tabdef.inc"
-#undef TABDECL
-}};
+};
 
 #define TABDECL(x) #x
 const char* arm_instruction_names[4096] = {

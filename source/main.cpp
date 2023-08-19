@@ -53,12 +53,17 @@
 #include "PSP/vram.h"
 #include "PSP/PSPDisplay.h"
 
+#ifdef PROFILE
+#include "pspprof.h"
+#endif
+
 
 #include "PSP/pspvfpu.h"
 
 PSP_MODULE_INFO("DesmuME PSP", 0, 3, 0);
 
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
+
 
 
 //From Daedalus
@@ -127,11 +132,11 @@ const char * save_type_names[] = {
 };
 
 configured_features my_config;
-extern bool ARM7_SKIP_HACK;
+
 
 void ShowFPS(int x,int y){
   pspDebugScreenSetXY(x,y);
-  pspDebugScreenPrintf("FPS: %d    Underclock: %d  ", FPS_Counter, ARM7_SKIP_HACK);
+  pspDebugScreenPrintf("FPS: %d        ", FPS_Counter);
 }
 
 void PrintfXY(const char* text, int x, int y) {
@@ -172,10 +177,8 @@ static void desmume_cycle()
   if (my_config.showfps)
       ShowFPS(0,3);
 
-#ifndef LOWRAM
 	if (my_config.enable_sound)
 		SPU_Emulate_user();
-#endif
 }
 
 
@@ -191,6 +194,14 @@ void WriteLog(char* msg)
 {
 	FILE* fd;
 	fd = fopen("debug_log.txt", "a");
+	fprintf(fd, "%s\n", msg);
+	fclose(fd);
+}
+
+void WriteHash(char* msg)
+{
+	FILE* fd;
+	fd = fopen("hashes.txt", "a");
 	fprintf(fd, "%s\n", msg);
 	fclose(fd);
 }
@@ -211,7 +222,6 @@ void EMU_Conf(){
 
   pspDebugScreenClear();
 
-#ifndef LOWRAM
   if (my_config.enable_sound && !audio_inited) {
 	  SPU_ChangeSoundCore(SNDCORE_PSP, PSP_AUDIO_SAMPLE_MAX);
 	  SPU_SetSynchMode(0, 0 /*CommonSettings.SPU_sync_method*/);
@@ -221,7 +231,6 @@ void EMU_Conf(){
 	  SPU_ChangeSoundCore(SNDCORE_DUMMY, 0);
 	  audio_inited = false;
   }
-#endif
 
   PrintfXY("ROM: ", 0, 1);
   PrintfXY(gameInfo.ROMname, 5, 1);
@@ -236,6 +245,10 @@ void ChangeRom(bool reset){
 
   if (reset){
     NDS_Reset();
+
+    #ifdef PROFILE
+      gprof_cleanup();
+    #endif
 
     //Init psp display again
     pspDebugScreenInitEx((void*)(0x44000000), PSP_DISPLAY_PIXEL_FORMAT_5551, 1);
@@ -268,10 +281,13 @@ void ResetRom() {
 	execute = true;
 }
 
+const int TARGET_FPS = 30;
+const int FRAME_TIME_MICROSEC = 1000000 / TARGET_FPS;
+
 int main(int argc, char **argv) {
 
-  u64 fps_timing = 0;
-  u64 fps_previous_time = 0;
+  u32 last_fps_timing = 0;
+  u32 previous_time = 0;
   u32 fps_frame_counter = 0;
 
   /* the firmware settings */
@@ -279,9 +295,10 @@ int main(int argc, char **argv) {
 
   scePowerSetClockFrequency(333, 333, 166);
 
+  _DisableFPUExceptions();
+
   pspDebugScreenInitEx((void*)(0x44000000), PSP_DISPLAY_PIXEL_FORMAT_5551, 1);
 
-  _DisableFPUExceptions();
 
   Init_PSP_DISPLAY_FRAMEBUFF();
 
@@ -292,21 +309,22 @@ int main(int argc, char **argv) {
 
   slot2_Init();
 
-  slot2_Change(NDS_SLOT2_AUTO);
+  slot2_Change(NDS_SLOT2_NONE);
 
   /* Create the dummy firmware */
   NDS_CreateDummyFirmware( &fw_config);
 
-  ChangeRom(false);
-
-  EMU_Conf();
-
-  InitDisplayParams(&my_config);
+  #ifdef PROFILE
+    execute = true;
+    NDS_LoadROM("test.nds");
+    my_config.Render3D = true;
+    my_config.showfps = true;
+  #else
+    ChangeRom(false);
+    EMU_Conf();
+  #endif
 
   EMU_SCREEN();
-
-  fps_timing = 0;
-  fps_previous_time = 0;
 
   u8 _frameskip = my_config.frameskip;
 
@@ -314,40 +332,41 @@ int main(int argc, char **argv) {
 
   while(execute)
   {
-
-    if (my_config.showfps){
-      sceRtcGetCurrentTick(&fps_timing);
-	  
-
-      if((fps_timing - fps_previous_time)/sceRtcGetTickResolution() >= 1)
-      {
-        fps_previous_time = fps_timing;
-        FPS_Counter = fps_frame_counter;
-        fps_frame_counter = 0;
+      
+    if (my_config.frameskip == 0) 
+      desmume_cycle();
+    else{
+  
+      if (_frameskip--) {
+        desmume_cycle();
+        NDS_SkipNextFrame();
+      } else {
+        _frameskip = my_config.frameskip;
       }
+
     }
 
-    if (my_config.fps_cap && FPS_Counter >= 30) sceDisplayWaitVblankStart(); //cap the framerate to 60- 30
+    u32 curr_timing = sceKernelGetSystemTimeLow();
 
-    if (my_config.frameskip == 0) {
-      desmume_cycle();
-
-      ++fps_frame_counter;
-      NDS_exec<false>();
-      continue;
-    }
-    
-    
-    if (_frameskip--) {
-      desmume_cycle();
-      NDS_SkipNextFrame();
-    }
-    else {
-      _frameskip = my_config.frameskip;
-    }
+    NDS_exec<false>();
 
     ++fps_frame_counter;
-    NDS_exec<false>();
+
+    if(curr_timing - last_fps_timing >= 1000000)
+    {
+      FPS_Counter = fps_frame_counter;//(fps_frame_counter * 1000000) / (curr_timing - last_fps_timing);
+      fps_frame_counter = 0;
+      last_fps_timing = curr_timing;
+    }
+
+    if (my_config.fps_cap){
+        const auto elapsedFrameTime = (curr_timing - previous_time);
+
+        if (elapsedFrameTime <= FRAME_TIME_MICROSEC)
+          sceKernelDelayThread(FRAME_TIME_MICROSEC - elapsedFrameTime);
+
+        previous_time = curr_timing;
+    }
   }
 
   NDS_DeInit();

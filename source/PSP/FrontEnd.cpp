@@ -499,8 +499,8 @@ int selpos=0, oldpos = -1, oldpage = 0, ndir = 0;
 void DisplayFileList(char* root)
 {
 
-	/*DrawRom(root, &filelist, selpos, true);
-	return;*/
+	DrawRom(root, &filelist, selpos, true);
+	return;
 
 	static const int MAX_ROM = filelist.cnt;
 	static const int ROM_SHOWN = 20;
@@ -570,7 +570,7 @@ void DSEmuGui(char *path,char *out)
 
 	getcwd(app_path,128);
 
-	sprintf(tmp,"%s/ROMS",app_path);
+	sprintf(tmp,"%s/ROMS/",app_path);
 
 	GetFileList(tmp);
 
@@ -614,19 +614,21 @@ void DSEmuGui(char *path,char *out)
 				}
 			
 				if(pad.Buttons & PSP_CTRL_UP){
-					selpos--;
+					//selpos--;
+					selpos -= 3;
 					if(selpos < 0)selpos=0;
 				}else 
 				if(pad.Buttons & PSP_CTRL_DOWN){
-					selpos++;
+					//selpos++;
+					selpos += 3;
 					if(selpos >= filelist.cnt) selpos=filelist.cnt-1;
 				}else
 				if (pad.Buttons & PSP_CTRL_LEFT) {
-					selpos -= 10;
+					selpos --;
 					if(selpos < 0)selpos=0;
 				}else
 				if (pad.Buttons & PSP_CTRL_RIGHT) {
-					selpos+=10;
+					selpos++;
 					if(selpos >= filelist.cnt -1)selpos=filelist.cnt-1;
 				}
 

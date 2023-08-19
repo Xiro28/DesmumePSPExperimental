@@ -44,14 +44,14 @@ void _NOSSE_MatrixMultVec4x4(const float* matrix, float* vecPtr)
 	*/
 	
 	    __asm__ volatile (
-		"lv.q C100,  0 + %2\n"
-		"lv.q C110, 16 + %2\n"
-		"lv.q C120, 32 + %2\n"
-		"lv.q C130, 48 + %2\n"
-		"lv.q C200,  0 + %1\n"
+		"lv.q C100,  0 + %1\n"
+		"lv.q C110, 16 + %1\n"
+		"lv.q C120, 32 + %1\n"
+		"lv.q C130, 48 + %1\n"
+		"lv.q C200,  0 + %0\n"
 		"vtfm4.q C000, E100, C200\n"
 		"sv.q C000, %0\n"
-		: "=m"(*vecPtr) : "m"(*vecPtr), "m"(*matrix)
+		: "+m"(*vecPtr) : "m"(*matrix)
 		);
 		
 
@@ -78,14 +78,14 @@ void MatrixMultVec3x3 (const float *matrix, float *vecPtr)
 	vecPtr[2] = x * matrix[2] + y * matrix[6] + z * matrix[10];*/
 
 	__asm__ volatile (
-		"lv.q C100,  0 + %2\n"
-		"lv.q C110, 16 + %2\n"
-		"lv.q C120, 32 + %2\n"
-		"lv.q C200,  0 + %1\n"
+		"lv.q C100,  0 + %1\n"
+		"lv.q C110, 16 + %1\n"
+		"lv.q C120, 32 + %1\n"
+		"lv.q C200,  0 + %0\n"
 		"vtfm3.t C000, E100, C200\n"
 		"sv.q C000, %0\n"
-		: "=m"(*vecPtr) : "m"(*vecPtr), "m"(*matrix)
-		);
+		: "+m"(*vecPtr) : "m"(*matrix)
+	);
 
 }
 
@@ -93,15 +93,15 @@ void MatrixMultiply (float *matrix, const float *rightMatrix)
 {
 	__asm__
 		(
-			"ulv.q C000,  0 + %1\n"
-			"ulv.q C010, 16 + %1\n"
-			"ulv.q C020, 32 + %1\n"
-			"ulv.q C030, 48 + %1\n"
+			"ulv.q C000,  0 + %0\n"
+			"ulv.q C010, 16 + %0\n"
+			"ulv.q C020, 32 + %0\n"
+			"ulv.q C030, 48 + %0\n"
 
-			"ulv.q C100,  0 + %2\n"
-			"ulv.q C110, 16 + %2\n"
-			"ulv.q C120, 32 + %2\n"
-			"ulv.q C130, 48 + %2\n"
+			"ulv.q C100,  0 + %1\n"
+			"ulv.q C110, 16 + %1\n"
+			"ulv.q C120, 32 + %1\n"
+			"ulv.q C130, 48 + %1\n"
 
 			"vmmul.q M200, M000, M100\n"
 
@@ -109,7 +109,7 @@ void MatrixMultiply (float *matrix, const float *rightMatrix)
 			"usv.q C210, 16 + %0\n"
 			"usv.q C220, 32 + %0\n"
 			"usv.q C230, 48 + %0\n"
-			: "=m"(*matrix) : "m"(*matrix), "m"(*rightMatrix) : "memory");
+			: "+m"(*matrix) : "m"(*rightMatrix) : "memory");
 }
 //Note to use it: needs (1/value) to work
 void MatrixDivide4X4(float* matrix, float div)
@@ -347,95 +347,4 @@ void MatrixStackLoadMatrix (MatrixStack *stack, int pos, const float *ptr)
 {
 	//assert(pos<31);
 	MatrixCopy (&stack->matrix[pos*16], ptr);
-}
-
-void Vector2Copy(float *dst, const float *src)
-{
-	dst[0] = src[0];
-	dst[1] = src[1];
-}
-
-void Vector2Add(float *dst, const float *src)
-{
-	dst[0] += src[0];
-	dst[1] += src[1];
-}
-
-void Vector2Subtract(float *dst, const float *src)
-{
-	dst[0] -= src[0];
-	dst[1] -= src[1];
-}
-
-float Vector2Dot(const float *a, const float *b)
-{
-	return (a[0]*b[0]) + (a[1]*b[1]);
-}
-
-/* http://www.gamedev.net/community/forums/topic.asp?topic_id=289972 */
-float Vector2Cross(const float *a, const float *b)
-{
-	return (a[0]*b[1]) - (a[1]*b[0]);
-}
-
-float Vector3Dot(const float *a, const float *b) 
-{
-	return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
-}
-
-void Vector3Cross(float* dst, const float *a, const float *b) 
-{
-	dst[0] = a[1]*b[2] - a[2]*b[1];
-	dst[1] = a[2]*b[0] - a[0]*b[2];
-	dst[2] = a[0]*b[1] - a[1]*b[0];
-}
-
-
-float Vector3Length(const float *a)
-{
-	float lengthSquared = Vector3Dot(a,a);
-	float length = sqrt(lengthSquared);
-	return length;
-}
-
-void Vector3Add(float *dst, const float *src)
-{
-	dst[0] += src[0];
-	dst[1] += src[1];
-	dst[2] += src[2];
-}
-
-void Vector3Subtract(float *dst, const float *src)
-{
-	dst[0] -= src[0];
-	dst[1] -= src[1];
-	dst[2] -= src[2];
-}
-
-void Vector3Scale(float *dst, const float scale)
-{
-	dst[0] *= scale;
-	dst[1] *= scale;
-	dst[2] *= scale;
-}
-
-void Vector3Copy(float *dst, const float *src)
-{
-	dst[0] = src[0];
-	dst[1] = src[1];
-	dst[2] = src[2];
-}
-
-void Vector3Normalize(float *dst)
-{
-	float length = Vector3Length(dst);
-	Vector3Scale(dst,1.0f/length);
-}
-
-void Vector4Copy(float *dst, const float *src)
-{
-	dst[0] = src[0];
-	dst[1] = src[1];
-	dst[2] = src[2];
-	dst[3] = src[3];
 }

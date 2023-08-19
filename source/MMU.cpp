@@ -51,6 +51,8 @@
 #include <pspsuspend.h>
 #include "PSP/pspvfpu.h"
 
+#include "arm7_hle.h"
+
 //HCF: To allocate volatile memory
 /*
 void* HCF_RAM_ARRAY;
@@ -2033,38 +2035,19 @@ static void writereg_POWCNT1(const int size, const u32 adr, const u32 val) {
 	}
 }
 
+
 static INLINE void MMU_IPCSync(u8 proc, u32 val)
 {
 	//INFO("IPC%s sync 0x%04X (0x%02X|%02X)\n", proc?"7":"9", val, val >> 8, val & 0xFF);
-	u32 sync_l = T1ReadLong(MMU.MMU_MEM[proc][0x40], 0x180) & 0xFFFF;
-	u32 sync_r = T1ReadLong(MMU.MMU_MEM[proc^1][0x40], 0x180) & 0xFFFF;
+	IPCSync7 &= 0xFFF0;
+	IPCSync7 |= ((val & 0x0F00) >> 8);
+	IPCSync9 &= 0xB0FF;
+	IPCSync9 |= (val & 0x4F00);
 
-	sync_l = ( sync_l & 0x000F ) | ( val & 0x0F00 );
-	sync_r = ( sync_r & 0x6F00 ) | ( (val >> 8) & 0x000F );
+	if ((val & 0x2000) && (IPCSync7 & 0x4000))
+		NDS_makeIrq(1, IRQ_BIT_IPCSYNC);
 
-	sync_l |= val & 0x6000;
-
-	if(nds.ensataEmulation && proc==1 && nds.ensataIpcSyncCounter<9) {
-		u32 iteration = (val&0x0F00)>>8;
-
-		if(iteration==8-nds.ensataIpcSyncCounter)
-			nds.ensataIpcSyncCounter++;
-		//else printf("ERROR: ENSATA IPC SYNC HACK FAILED; BAD THINGS MAY HAPPEN\n");
-
-		//for some reason, the arm9 doesn't handshake when ensata is detected.
-		//so we complete the protocol here, which is to mirror the values 8..0 back to 
-		//the arm7 as they are written by the arm7
-		sync_r &= 0xF0FF;
-		sync_r |= (iteration<<8);
-		sync_l &= 0xFFF0;
-		sync_l |= iteration;
-	}
-
-	T1WriteLong(MMU.MMU_MEM[proc][0x40], 0x180, sync_l);
-	T1WriteLong(MMU.MMU_MEM[proc^1][0x40], 0x180, sync_r);
-
-	if ((sync_l & IPCSYNC_IRQ_SEND) && (sync_r & IPCSYNC_IRQ_RECV))
-		NDS_makeIrq(proc^1, IRQ_BIT_IPCSYNC);
+	HLE_IPCSYNC();
 
 	NDS_Reschedule();
 }
@@ -2542,31 +2525,49 @@ void DmaController::doCopy()
 	//outside the loop
 	int time_elapsed = 0;
 	if(sz==4) {
+		/*if((src & 0x0F000000) == 0x02000000 && (dst>>20 == 0x70)){
+			time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
+			
+			memcpy_vfpu(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], &MMU.MAIN_MEM[src & _MMU_MAIN_MEM_MASK32], todo);
 
-		//time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
-
-		for(s32 i=(s32)todo; i>0; i--)
-		{
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_READ,TRUE>(src,true);
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_WRITE,TRUE>(dst,true);
-			u32 temp = _MMU_read32(procnum,MMU_AT_DMA,src);
-			_MMU_write32(procnum,MMU_AT_DMA,dst, temp);   
-			dst += dstinc;
-			src += srcinc;
+			dst += dstinc * todo;
+			src += srcinc * todo;
+			
+			//printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
+		}else*/{
+			//printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
+			for(s32 i=(s32)todo; i>0; i--)
+			{
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_READ,TRUE>(src,true);
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_WRITE,TRUE>(dst,true);
+				u32 temp = _MMU_read32(procnum,MMU_AT_DMA,src);
+				_MMU_write32(procnum,MMU_AT_DMA,dst, temp);   
+				dst += dstinc;
+				src += srcinc;
+			}
 		}
 	} else {
 
-		//time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
+		/*if((src & 0x0F000000) == 0x02000000 && (dst>>20 == 0x50)){
+			time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
+			
+			memcpy_vfpu(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], &MMU.MAIN_MEM[src & _MMU_MAIN_MEM_MASK32], todo/2);
 
-		for(s32 i=(s32)todo; i>0; i--)
-		{
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_READ,TRUE>(src,true);
-			time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_WRITE,TRUE>(dst,true);
-			u16 temp = _MMU_read16(procnum,MMU_AT_DMA,src);
-			_MMU_write16(procnum,MMU_AT_DMA,dst, temp);
-			dst += dstinc;
-			src += srcinc;
-		}
+			dst += dstinc * todo;
+			src += srcinc * todo;
+			
+			printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
+		}else{*/
+			for(s32 i=(s32)todo; i>0; i--)
+			{
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_READ,TRUE>(src,true);
+				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_WRITE,TRUE>(dst,true);
+				u16 temp = _MMU_read16(procnum,MMU_AT_DMA,src);
+				_MMU_write16(procnum,MMU_AT_DMA,dst, temp);
+				dst += dstinc;
+				src += srcinc;
+			}
+		//}
 	}
 
 	//printf("ARM%c dma of size %d from 0x%08X to 0x%08X took %d cycles\n",PROCNUM==0?'9':'7',todo*sz,saddr,daddr,time_elapsed);
@@ -2596,13 +2597,15 @@ void DmaController::doCopy()
 
 void triggerDma(EDMAMode mode)
 {
-	MACRODO2(0, {
-		const int i=X;
-		MACRODO4(0, {
-			const int j=X;
-			MMU_new.dma[i][j].tryTrigger(mode);
-		});
+	MACRODO4(0, {
+		const int j=X;
+		MMU_new.dma[0][j].tryTrigger(mode);
 	});
+	
+	/*MACRODO4(0, {
+		const int j=X;
+		MMU_new.dma[1][j].tryTrigger(mode);
+	});*/
 }
 
 void DmaController::tryTrigger(EDMAMode mode)
@@ -3428,6 +3431,15 @@ bool validateIORegsRead(u32 addr, u8 size)
 #define VALIDATE_IO_REGS_READ(PROC, SIZE) ;
 #endif
 
+
+bool isSlot2(u32 addr)
+{
+	if (addr < 0x08000000) return false;
+	if (addr >= 0x0A010000) return false;
+	
+	return true;
+}
+
 //================================================================================================== ARM9 *
 //=========================================================================================================
 //=========================================================================================================
@@ -3447,8 +3459,9 @@ void FASTCALL _MMU_ARM9_write08(u32 adr, u8 val)
 		return;
 	}
 
-	if (slot2_write<ARMCPU_ARM9, u8>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM9, u8>(adr, val))
+		return;*/
+	if (isSlot2(adr)) return;
 
 	//block 8bit writes to OAM and palette memory
 	if ((adr & 0x0F000000) == 0x07000000) return;
@@ -3723,8 +3736,10 @@ void FASTCALL _MMU_ARM9_write16(u32 adr, u16 val)
 		return;
 	}
 
-	if (slot2_write<ARMCPU_ARM9, u16>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM9, u16>(adr, val))
+		return;*/
+
+	if (isSlot2(adr)) return;
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4177,8 +4192,9 @@ void FASTCALL _MMU_ARM9_write32(u32 adr, u32 val)
 		return ;
 	}
 
-	if (slot2_write<ARMCPU_ARM9, u32>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM9, u32>(adr, val))
+		return;*/
+	if (isSlot2(adr)) return;
 
 #if 0
 	if ((adr & 0xFF800000) == 0x04800000) {
@@ -4602,9 +4618,10 @@ u8 FASTCALL _MMU_ARM9_read08(u32 adr)
 	if(adr<0x02000000)
 		return T1ReadByte(MMU.ARM9_ITCM, adr&0x7FFF);
 
-	u8 slot2_val;
-	if (slot2_read<ARMCPU_ARM9, u8>(adr, slot2_val))
-		return slot2_val;
+	u8 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM9, u8>(adr, slot2_val))
+		return slot2_val;*/
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4712,9 +4729,10 @@ u16 FASTCALL _MMU_ARM9_read16(u32 adr)
 	if(adr<0x02000000)
 		return T1ReadWord_guaranteedAligned(MMU.ARM9_ITCM, adr & 0x7FFE);	
 
-	u16 slot2_val;
-	if (slot2_read<ARMCPU_ARM9, u16>(adr, slot2_val))
-		return slot2_val;
+	u16 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM9, u16>(adr, slot2_val))
+		return slot2_val;*/
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4766,6 +4784,13 @@ u16 FASTCALL _MMU_ARM9_read16(u32 adr)
 			// ============================================= 3D end
 			case REG_IME :
 				return (u16)MMU.reg_IME[ARMCPU_ARM9];
+
+			case REG_IPCSYNC: return IPCSync9;
+
+			case REG_IPCFIFOCNT:
+			{	
+				return IPC_FIFOgetCnt(ARMCPU_ARM9);
+			}
 
 			
 			case REG_IE :
@@ -4824,9 +4849,10 @@ u32 FASTCALL _MMU_ARM9_read32(u32 adr)
 	if(adr<0x02000000) 
 		return T1ReadLong_guaranteedAligned(MMU.ARM9_ITCM, adr&0x7FFC);
 
-	u32 slot2_val;
-	if (slot2_read<ARMCPU_ARM9, u32>(adr, slot2_val))
-		return slot2_val;
+	u32 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM9, u32>(adr, slot2_val))
+		return slot2_val;*/
 
 	// Address is an IO register
 	if ((adr >> 24) == 4)
@@ -4926,6 +4952,13 @@ u32 FASTCALL _MMU_ARM9_read32(u32 adr)
 			
 			case REG_IF: return MMU.gen_IF<ARMCPU_ARM9>();
 
+			case REG_IPCSYNC: return IPCSync9;
+
+			case REG_IPCFIFOCNT:
+			{	
+				return IPC_FIFOgetCnt(ARMCPU_ARM9);
+			}
+
 			case REG_IPCFIFORECV :
 				return IPC_FIFOrecv(ARMCPU_ARM9);
 			case REG_TM0CNTL :
@@ -4969,8 +5002,10 @@ void FASTCALL _MMU_ARM7_write08(u32 adr, u8 val)
 
 	if (adr < 0x02000000) return; //can't write to bios or entire area below main memory
 
-	if (slot2_write<ARMCPU_ARM7, u8>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM7, u8>(adr, val))
+		return;*/;
+	
+	if (isSlot2(adr)) return;
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5083,8 +5118,9 @@ void FASTCALL _MMU_ARM7_write16(u32 adr, u16 val)
 
 	if (adr < 0x02000000) return; //can't write to bios or entire area below main memory
 
-	if (slot2_write<ARMCPU_ARM7, u16>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM7, u16>(adr, val))
+		return;*/
+	if (isSlot2(adr)) return;
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5210,7 +5246,7 @@ void FASTCALL _MMU_ARM7_write16(u32 adr, u16 val)
 				return;
 			case REG_IE + 2 :
 				NDS_Reschedule();
-				//emu_halt();
+				//emu_halt(); 
 				MMU.reg_IE[ARMCPU_ARM7] = (MMU.reg_IE[ARMCPU_ARM7]&0xFFFF) | (((u32)val)<<16);
 				return;
 				
@@ -5275,8 +5311,10 @@ void FASTCALL _MMU_ARM7_write32(u32 adr, u32 val)
 	if (adr < 0x02000000) return; //can't write to bios or entire area below main memory
 
 
-	if (slot2_write<ARMCPU_ARM7, u32>(adr, val))
-		return;
+	/*if (slot2_write<ARMCPU_ARM7, u32>(adr, val))
+		return;*/
+	
+	if (isSlot2(adr)) return;
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5349,7 +5387,6 @@ void FASTCALL _MMU_ARM7_write32(u32 adr, u32 val)
 				IPC_FIFOcnt(ARMCPU_ARM7, val);
 				return;
 			case REG_IPCFIFOSEND:
-
 				IPC_FIFOsend(ARMCPU_ARM7, val);
 				return;
 			
@@ -5410,9 +5447,11 @@ u8 FASTCALL _MMU_ARM7_read08(u32 adr)
 			return WIFI_read16(adr) & 0xFF;
 	}
 
-	u8 slot2_val;
-	if (slot2_read<ARMCPU_ARM7, u8>(adr, slot2_val))
-		return slot2_val;
+	u8 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM7, u8>(adr, slot2_val))
+		return slot2_val;*/
+		
 
 	if (SPU_core->isSPU(adr))
 	{
@@ -5464,9 +5503,10 @@ u16 FASTCALL _MMU_ARM7_read16(u32 adr)
 	if ((adr & 0xFFFF0000) == 0x04800000)
 		return WIFI_read16(adr) ;
 
-	u16 slot2_val;
-	if (slot2_read<ARMCPU_ARM7, u16>(adr, slot2_val))
-		return slot2_val;
+	u16 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM7, u16>(adr, slot2_val))
+		return slot2_val;*/
 
     if (SPU_core->isSPU(adr))
     {
@@ -5564,9 +5604,10 @@ u32 FASTCALL _MMU_ARM7_read32(u32 adr)
 	if ((adr & 0xFFFF0000) == 0x04800000)
 		return (WIFI_read16(adr) | (WIFI_read16(adr+2) << 16));
 
-	u32 slot2_val;
-	if (slot2_read<ARMCPU_ARM7, u32>(adr, slot2_val))
-		return slot2_val;
+	u32 slot2_val = 0;
+	if (isSlot2(adr)) return slot2_val;
+	/*if (slot2_read<ARMCPU_ARM7, u32>(adr, slot2_val))
+		return slot2_val;*/
 
     if (SPU_core->isSPU(adr))
     {

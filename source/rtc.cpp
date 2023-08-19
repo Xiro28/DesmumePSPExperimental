@@ -30,34 +30,6 @@
 #endif
 //#include "movie.h"
 
-
-typedef struct
-{
-	// RTC registers
-	u8	regStatus1;
-	u8	regStatus2;
-	u8	regAdjustment;
-	u8	regFree;
-
-	// BUS
-	u8	_prevSCK;
-	u8	_prevCS;
-	u8	_prevSIO;
-	u8	_SCK;
-	u8	_CS;
-	u8	_SIO;
-	u8	_DD;
-	u16	_REG;
-
-	// command & data
-	u8	cmd;
-	u8	cmdStat;
-	u8	bitsCount;
-	u8	data[8];
-
-	u8 cmdBitsSize[8];
-} _RTC;
-
 _RTC	rtc;
 
 SFORMAT SF_RTC[]={
@@ -118,7 +90,7 @@ bool moviemode=false;
 	*/
 //}
 
-static void rtcRecv()
+void rtcRecv()
 {
 	//INFO("RTC Read command 0x%02X\n", (rtc.cmd >> 1));
 

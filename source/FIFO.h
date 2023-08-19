@@ -22,22 +22,17 @@
 #define FIFO_H
 
 #include "types.h"
+#include "MD_FIFO.h"
 
 //=================================================== IPC FIFO
-typedef struct
-{
-	u32		buf[16];
-	
-	u8		head;
-	u8		tail;
-	u8		size;
-} IPC_FIFO;
 
-extern IPC_FIFO ipc_fifo[2];
+extern FIFO<u32, 16> IPCFIFO9; // FIFO in which the ARM9 writes
+extern FIFO<u32, 16> IPCFIFO7;
 extern void IPC_FIFOinit(u8 proc);
 extern void IPC_FIFOsend(u8 proc, u32 val);
 extern u32 IPC_FIFOrecv(u8 proc);
 extern void IPC_FIFOcnt(u8 proc, u16 val);
+extern u32 IPC_FIFOgetCnt(u8 proc);
 
 //=================================================== GFX FIFO
 

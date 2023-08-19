@@ -307,9 +307,9 @@ struct armcpu_t
 	// flag indicating if the processor is stalled (for debugging)
 	int stalled;
 
-#if defined(_M_X64) || defined(__x86_64__)
-	u8 cond_table[16*16];
-#endif
+	u8* MAIN_MEM;
+
+	//u8 cond_table[16*16];
 	
 	/** there is a pending irq for the cpu */
 	int irq_flag;

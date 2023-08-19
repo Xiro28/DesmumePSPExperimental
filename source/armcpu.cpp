@@ -242,10 +242,7 @@ void armcpu_t::changeCPSR()
 
 void armcpu_init(armcpu_t *armcpu, u32 adr)
 {
-#if defined(_M_X64) || defined(__x86_64__)
-	memcpy(&armcpu->cond_table[0], &arm_cond_table[0], sizeof(arm_cond_table));
-#endif
-
+	//memcpy(&armcpu->cond_table[0], &arm_cond_table[0], sizeof(arm_cond_table));
 	//J_Init(false);
 	
 	armcpu->LDTBit = (armcpu->proc_ID==0); //set ARMv5 style bit--different for each processor
@@ -281,6 +278,8 @@ void armcpu_init(armcpu_t *armcpu, u32 adr)
 	//do something sensible when booting up to a thumb address
 	armcpu->next_instruction = adr & ~1;
 	armcpu->CPSR.bits.T = BIT0(adr);
+
+	armcpu->MAIN_MEM = MMU.MAIN_MEM;
 	
 //#ifndef GDB_STUB
 	_armcpu_prefetch(armcpu);
@@ -401,7 +400,7 @@ u32 armcpu_Wait4IRQ(armcpu_t *cpu)
 	cpu->freeze = (CPU_FREEZE_WAIT_IRQ | CPU_FREEZE_IE_IF);
 	return 1;
 }
- 
+  
 template<u32 PROCNUM>
 FORCEINLINE static u32 armcpu_prefetch()
 {
@@ -600,46 +599,9 @@ u32 TRAPUNDEF(armcpu_t* cpu)
 }
 
 
-int ARM7_ME(int data)
-{
-	// Usually, fetching and executing are processed parallelly.
-	// So this function stores the cycles of each process to
-	// the variables below, and returns appropriate cycle count.
-	u32 cFetch = 0;
-	u32 cExecute = 0;
-
-	const int PROCNUM = 1;
-
-	if (ARMPROC.CPSR.bits.T == 0)
-	{
-		if (
-			CONDITION(ARMPROC.instruction) == 0x0E  //fast path for unconditional instructions
-			|| (TEST_COND(CONDITION(ARMPROC.instruction), CODE(ARMPROC.instruction), ARMPROC.CPSR)) //handles any condition
-			)
-		{
-			///	printf("%d\n", INSTRUCTION_INDEX(ARMPROC.instruction));
-			cExecute = arm_instructions_set[PROCNUM][INSTRUCTION_INDEX(ARMPROC.instruction)](ARMPROC.instruction);
-
-		}
-		else
-			cExecute = 1; // If condition=false: 1S cycle
-
-		cFetch = armcpu_prefetch<PROCNUM>();
-
-		return MMU_fetchExecuteCycles<PROCNUM>(cExecute, cFetch);
-	}
-
-	cExecute = thumb_instructions_set[PROCNUM][ARMPROC.instruction >> 6](ARMPROC.instruction);
-
-
-	cFetch = armcpu_prefetch<PROCNUM>();
-
-	return MMU_fetchExecuteCycles<PROCNUM>(cExecute, cFetch);
-}
-
 template<int PROCNUM>
 u32 armcpu_execTFast(){
-	u32 cExecute = thumb_instructions_set[PROCNUM][ARMPROC.instruction>>6](ARMPROC.instruction);
+	u32 cExecute = thumb_instructions_set[ARMPROC.instruction>>6](ARMPROC.instruction);
 	u32 cFetch = armcpu_prefetch<PROCNUM>();
 	return MMU_fetchExecuteCycles<PROCNUM>(cExecute, cFetch);
 }
@@ -650,7 +612,7 @@ u32 armcpu_execAFast()
 	// Usually, fetching and executing are processed parallelly.
 	// So this function stores the cycles of each process to
 	// the variables below, and returns appropriate cycle count.
-	u32 cExecute = arm_instructions_set[PROCNUM][INSTRUCTION_INDEX(ARMPROC.instruction)](ARMPROC.instruction);
+	u32 cExecute = arm_instructions_set[INSTRUCTION_INDEX(ARMPROC.instruction)](ARMPROC.instruction);
 	u32 cFetch = armcpu_prefetch<PROCNUM>();
 
 	return MMU_fetchExecuteCycles<PROCNUM>(cExecute, cFetch);
@@ -675,7 +637,7 @@ u32 armcpu_exec()
 			)
 		{	
 		///	printf("%d\n", INSTRUCTION_INDEX(ARMPROC.instruction));
-			cExecute = arm_instructions_set[PROCNUM][INSTRUCTION_INDEX(ARMPROC.instruction)](ARMPROC.instruction);
+			cExecute = arm_instructions_set[INSTRUCTION_INDEX(ARMPROC.instruction)](ARMPROC.instruction);
 		
 		}
 		else
@@ -686,7 +648,7 @@ u32 armcpu_exec()
 		return MMU_fetchExecuteCycles<PROCNUM>(cExecute, cFetch);
 	}
 
-	cExecute = thumb_instructions_set[PROCNUM][ARMPROC.instruction>>6](ARMPROC.instruction);
+	cExecute = thumb_instructions_set[ARMPROC.instruction>>6](ARMPROC.instruction);
 
 
 	cFetch = armcpu_prefetch<PROCNUM>();
@@ -707,7 +669,7 @@ u32 FastArmcpu_exec(u32 opcode)
 			 TEST_COND(CONDITION(opcode), CODE(opcode), ARMPROC.CPSR) //handles any condition
 		   )
 		{	
-			return arm_instructions_set[PROCNUM][INSTRUCTION_INDEX(opcode)](opcode);
+			return arm_instructions_set[INSTRUCTION_INDEX(opcode)](opcode);
 		
 		}
 		
@@ -731,10 +693,10 @@ template u32 armcpu_execAFast<1>();
 #ifdef HAVE_JIT
 void arm_jit_sync()
 {
-	NDS_ARM7.next_instruction = NDS_ARM7.instruct_adr;
+	//NDS_ARM7.next_instruction = NDS_ARM7.instruct_adr;
 	NDS_ARM9.next_instruction = NDS_ARM9.instruct_adr;
 	armcpu_prefetch<0>();
-	armcpu_prefetch<1>();
+	//armcpu_prefetch<1>();
 }
 
 template<int PROCNUM, bool jit>

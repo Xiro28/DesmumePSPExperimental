@@ -147,6 +147,7 @@ int pl_snd_init(int sample_count,
 
   if (failed)
   {
+    printf("Failed to start audio thread\n");
     sound_stop = 1;
     for (i = 0; i < AUDIO_CHANNELS; i++)
     {
@@ -205,8 +206,7 @@ static inline int play_blocking(unsigned int channel,
   if (!sound_ready) return -1;
   //if (channel >= AUDIO_CHANNELS) return -1;
 
-  return sceAudioOutputPannedBlocking(sound_stream[channel].sound_ch_handle,
-    vol1, vol2, buf);
+  return sceAudioOutputBlocking(sound_stream[channel].sound_ch_handle, vol2, buf);
 }
 
 static int channel_thread(unsigned int args, void *argp)
@@ -276,6 +276,8 @@ static int channel_thread(int* arg)
     for (j = 0; j < 2; j++)
         memset(ch_info->sample_buffer[j], 0,
             ch_info->samples[j] * get_bytes_per_sample(channel));
+
+    printf("IO thread started\n");
 
     while (!sound_stop)
     {

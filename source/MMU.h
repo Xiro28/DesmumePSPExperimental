@@ -333,6 +333,7 @@ struct GCBUS_Controller
 	eCardMode mode; //probably only one of these
 };
 
+
 #define DUP2(x)  x, x
 #define DUP4(x)  x, x, x, x
 #define DUP8(x)  x, x, x, x,  x, x, x, x
@@ -452,7 +453,7 @@ struct MMU_struct
 	u8 ARM9_REG[0x100000]; //this variable is evil and should be removed by correctly emulating all registers.
 	//u8 ARM9_REG[0x200000]; //this variable is evil and should be removed by correctly emulating all registers.
 
-	u8 MAIN_MEM[4 * 1024 * 1024]; //expanded from 4MB to 8MB to support debug consoles
+	__attribute__((align(64))) u8 MAIN_MEM[4 * 1024 * 1024]; //expanded from 4MB to 8MB to support debug consoles
 };
 
 
@@ -848,7 +849,8 @@ FORCEINLINE void _MMU_write08(const int PROCNUM, const MMU_ACCESS_TYPE AT, const
 
 	if ( (addr & 0x0F000000) == 0x02000000) {
 #ifdef HAVE_JIT
-		JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK, 0) = 0;
+		if (PROCNUM == ARMCPU_ARM9)
+			JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK, 0) = 0;
 #endif
 		T1WriteByte( MMU.MAIN_MEM, addr & _MMU_MAIN_MEM_MASK, val);
 #ifdef HAVE_LUA
@@ -887,7 +889,8 @@ FORCEINLINE void _MMU_write16(const int PROCNUM, const MMU_ACCESS_TYPE AT, const
 
 	if ( (addr & 0x0F000000) == 0x02000000) {
 #ifdef HAVE_JIT
-		JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK16, 0) = 0;
+		if (PROCNUM == ARMCPU_ARM9)
+			JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK16, 0) = 0;
 #endif
 		T1WriteWord( MMU.MAIN_MEM, addr & _MMU_MAIN_MEM_MASK16, val);
 #ifdef HAVE_LUA
@@ -926,8 +929,10 @@ FORCEINLINE void _MMU_write32(const int PROCNUM, const MMU_ACCESS_TYPE AT, const
 
 	if ( (addr & 0x0F000000) == 0x02000000) {
 #ifdef HAVE_JIT
-		JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK32, 0) = 0;
-		JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK32, 1) = 0;
+		if (PROCNUM == ARMCPU_ARM9){
+			JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK32, 0) = 0;
+			JIT_COMPILED_FUNC_KNOWNBANK(addr, MAIN_MEM, _MMU_MAIN_MEM_MASK32, 1) = 0;
+		}
 #endif
 		T1WriteLong( MMU.MAIN_MEM, addr & _MMU_MAIN_MEM_MASK32, val);
 #ifdef HAVE_LUA
@@ -981,7 +986,7 @@ template<int PROCNUM>
 FORCEINLINE u8 DYNA_MMU_read08(u32 addr) { return _MMU_read08(PROCNUM, MMU_AT_CODE, addr); }
 
 template<int PROCNUM>
-FORCEINLINE u16 DYNA_MMU_read16(u32 addr) { return _MMU_read16(PROCNUM, MMU_AT_CODE, addr); }
+FORCEINLINE u16 DYNA_MMU_read16(u32 addr) { return _MMU_read16(PROCNUM, MMU_AT_CODE, addr&0xFFFFFFFE); }
 
 template<int PROCNUM>
 FORCEINLINE u32 DYNA_MMU_read32(u32 addr) { return _MMU_read32(PROCNUM, MMU_AT_CODE, addr); }

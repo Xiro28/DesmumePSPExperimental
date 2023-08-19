@@ -215,12 +215,12 @@ void update_keypad(u16 keys)
 u16 get_keypad( void)
 {
   u16 keypad;
-  keypad = ~MMU.ARM7_REG[0x136];
+  keypad = MMU.ARM7_REG[0x136];
   keypad = (keypad & 0x3) << 10;
 #ifdef WORDS_BIGENDIAN
   keypad |= ~(MMU.ARM9_REG[0x130] | (MMU.ARM9_REG[0x131] << 8)) & 0x3FF;
 #else
-  keypad |= ~((u16 *)MMU.ARM9_REG)[0x130>>1] & 0x3FF;
+  keypad |= ((u16 *)MMU.ARM9_REG)[0x130>>1] & 0x3FF;
 #endif
   return keypad;
 }
@@ -361,10 +361,6 @@ process_ctrls_event(u16 &keypad)
 
 	  set_mouse_coord(mouse.x, mouse.y);
 
-	  if (pad.Buttons & PSP_CTRL_RTRIGGER && pad.Buttons & PSP_CTRL_TRIANGLE) {
-	  	ARM7_SKIP_HACK = !ARM7_SKIP_HACK;
-		return;
-	  }
 
 	  if (pad.Buttons & PSP_CTRL_RTRIGGER && pad.Buttons & PSP_CTRL_CIRCLE) {
 	  	mouse.click = TRUE;

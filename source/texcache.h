@@ -54,7 +54,7 @@ public:
 	bool suspectedInvalid;
 	bool assumedInvalid;
 
-	u8* decoded; //decoded texture data
+	__attribute__((aligned(16))) u8* decoded; //decoded texture data
 
 	void (*deleteCallback)(TexCacheItem*);
 

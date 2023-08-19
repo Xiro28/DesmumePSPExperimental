@@ -250,6 +250,8 @@ struct NDSSystem
 	bool Is_DebugConsole() { return false; }
 };
 
+extern NDSSystem nds;
+
 /** /brief A touchscreen calibration point.
  */
 struct NDS_fw_touchscreen_cal {

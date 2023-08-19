@@ -1182,15 +1182,11 @@ TEMPLATE static  u32 FASTCALL OP_BLX_THUMB(const u32 i)
 //   The End
 //-----------------------------------------------------------------------------
 
-const OpFunc thumb_instructions_set[2][1024] = {{
+const OpFunc thumb_instructions_set[1024] = {
 #define TABDECL(x) x<0>
 #include "thumb_tabdef.inc"
 #undef TABDECL
-},{
-#define TABDECL(x) x<1>
-#include "thumb_tabdef.inc"
-#undef TABDECL
-}};
+};
 
 #define TABDECL(x) #x
 const char* thumb_instruction_names[1024] = {

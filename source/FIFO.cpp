@@ -29,138 +29,89 @@
 #include "NDSSystem.h"
 #include "gfx3d.h"
 
+#include "arm7_hle.h"
+
+
 // ========================================================= IPC FIFO
-IPC_FIFO ipc_fifo[2];
+FIFO<u32, 16> IPCFIFO9; // FIFO in which the ARM9 writes
+FIFO<u32, 16> IPCFIFO7;
 
 void IPC_FIFOinit(u8 proc)
 {
-	memset(&ipc_fifo[proc], 0, sizeof(IPC_FIFO));
-	T1WriteWord(MMU.MMU_MEM[proc][0x40], 0x184, 0x00000101);
+	IPCFIFO9.Clear();
+    IPCFIFO7.Clear();
 }
 
 void IPC_FIFOsend(u8 proc, u32 val)
 {
-	u16 cnt_l = T1ReadWord(MMU.MMU_MEM[proc][0x40], 0x184);
-	if (!(cnt_l & IPCFIFOCNT_FIFOENABLE)) return;			// FIFO disabled
-	u8	proc_remote = proc ^ 1;
 
-	if (ipc_fifo[proc].size > 15)
-	{
-		cnt_l |= IPCFIFOCNT_FIFOERROR;
-		T1WriteWord(MMU.MMU_MEM[proc][0x40], 0x184, cnt_l);
-		return;
+	if (IPCFIFOCnt9 & IPCFIFOCNT_FIFOENABLE){
+
+		if (IPCFIFO9.IsFull()){
+			IPCFIFOCnt9 |= 0x4000;
+			return;
+		}else
+		{
+			bool wasempty = IPCFIFO9.IsEmpty();
+			IPCFIFO9.Write(val);
+			OnIPCRequest();
+			if ((IPCFIFOCnt7 & 0x0400) && wasempty)
+				NDS_makeIrq(1, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
+		}
+		
+		NDS_Reschedule();
 	}
-
-	u16 cnt_r = T1ReadWord(MMU.MMU_MEM[proc_remote][0x40], 0x184);
-
-	//LOG("IPC%s send FIFO 0x%08X size %03i (l 0x%X, tail %02i) (r 0x%X, tail %02i)\n", 
-	//	proc?"7":"9", val, ipc_fifo[proc].size, cnt_l, ipc_fifo[proc].tail, cnt_r, ipc_fifo[proc^1].tail);
-	
-	cnt_l &= 0xBFFC;		// clear send empty bit & full
-	cnt_r &= 0xBCFF;		// set recv empty bit & full
-	ipc_fifo[proc].buf[ipc_fifo[proc].tail] = val;
-	ipc_fifo[proc].tail++;
-	ipc_fifo[proc].size++;
-	if (ipc_fifo[proc].tail > 15) ipc_fifo[proc].tail = 0;
-	
-	if (ipc_fifo[proc].size > 15)
-	{
-		cnt_l |= IPCFIFOCNT_SENDFULL;		// set send full bit
-		cnt_r |= IPCFIFOCNT_RECVFULL;		// set recv full bit
-	}
-
-	T1WriteWord(MMU.MMU_MEM[proc][0x40], 0x184, cnt_l);
-	T1WriteWord(MMU.MMU_MEM[proc_remote][0x40], 0x184, cnt_r);
-
-	if(cnt_r&IPCFIFOCNT_RECVIRQEN)
-		NDS_makeIrq(proc_remote, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
-
-	NDS_Reschedule();
 }
 
 u32 IPC_FIFOrecv(u8 proc)
 {
-	u16 cnt_l = T1ReadWord(MMU.MMU_MEM[proc][0x40], 0x184);
-	if (!(cnt_l & IPCFIFOCNT_FIFOENABLE)) return (0);									// FIFO disabled
-	u8	proc_remote = proc ^ 1;
+	 if (IPCFIFOCnt9 & 0x8000)
+        {
+            u32 ret;
+            if (IPCFIFO7.IsEmpty())
+            {
+                IPCFIFOCnt9 |= 0x4000;
+                return 0;
+            }
+            else
+            {
+                ret = IPCFIFO7.Read();
 
-	u32 val = 0;
+                if (IPCFIFO7.IsEmpty() && (IPCFIFOCnt7 & 0x0004))
+                    NDS_makeIrq(1, IRQ_BIT_IPCFIFO_SENDEMPTY);
+				
+				NDS_Reschedule();
+            }
 
-	if ( ipc_fifo[proc_remote].size == 0 )		// remote FIFO error
-	{
-		cnt_l |= IPCFIFOCNT_FIFOERROR;
-		T1WriteWord(MMU.MMU_MEM[proc][0x40], 0x184, cnt_l);
-		return (0);
-	}
-
-	u16 cnt_r = T1ReadWord(MMU.MMU_MEM[proc_remote][0x40], 0x184);
-
-	cnt_l &= 0xBCFF;		// clear send full bit & empty
-	cnt_r &= 0xBFFC;		// set recv full bit & empty
-
-	val = ipc_fifo[proc_remote].buf[ipc_fifo[proc_remote].head];
-	ipc_fifo[proc_remote].head++;
-	ipc_fifo[proc_remote].size--;
-	if (ipc_fifo[proc_remote].head > 15) ipc_fifo[proc_remote].head = 0;
-	
-	//LOG("IPC%s recv FIFO 0x%08X size %03i (l 0x%X, tail %02i) (r 0x%X, tail %02i)\n", 
-	//	proc?"7":"9", val, ipc_fifo[proc].size, cnt_l, ipc_fifo[proc].tail, cnt_r, ipc_fifo[proc^1].tail);
-
-	if ( ipc_fifo[proc_remote].size == 0 )		// FIFO empty
-	{
-		cnt_l |= IPCFIFOCNT_RECVEMPTY;
-		cnt_r |= IPCFIFOCNT_SENDEMPTY;
-
-		if(cnt_r&IPCFIFOCNT_SENDIRQEN)
-			NDS_makeIrq(proc_remote, IRQ_BIT_IPCFIFO_SENDEMPTY);
-	}
-
-	T1WriteWord(MMU.MMU_MEM[proc][0x40], 0x184, cnt_l);
-	T1WriteWord(MMU.MMU_MEM[proc_remote][0x40], 0x184, cnt_r);
-
-	NDS_Reschedule();
-
-	return (val);
+            return ret;
+        }
+        else
+            return 0;
 }
 
 void IPC_FIFOcnt(u8 proc, u16 val)
 {
-	u16 cnt_l = T1ReadWord(MMU.MMU_MEM[proc][0x40], 0x184);
-	u16 cnt_r = T1ReadWord(MMU.MMU_MEM[proc^1][0x40], 0x184);
-
-	if (val & IPCFIFOCNT_FIFOERROR)
-	{
-		//at least SPP uses this, maybe every retail game
-		cnt_l &= ~IPCFIFOCNT_FIFOERROR;
-	}
-
-	if (val & IPCFIFOCNT_SENDCLEAR)
-	{
-		ipc_fifo[proc].head = 0; ipc_fifo[proc].tail = 0; ipc_fifo[proc].size = 0;
-
-		cnt_l |= IPCFIFOCNT_SENDEMPTY;
-		cnt_r |= IPCFIFOCNT_RECVEMPTY;
-		
-		cnt_l &= ~IPCFIFOCNT_SENDFULL;
-		cnt_r &= ~IPCFIFOCNT_RECVFULL;
-
-	}
-	cnt_l &= ~IPCFIFOCNT_WRITEABLE;
-	cnt_l |= val & IPCFIFOCNT_WRITEABLE;
-
-	//IPCFIFOCNT_SENDIRQEN may have been set (and/or the fifo may have been cleared) so we may need to trigger this irq
-	//(this approach is used by libnds fifo system on occasion in fifoInternalSend, and began happening frequently for value32 with r4326)
-	if(cnt_l&IPCFIFOCNT_SENDIRQEN) if(cnt_l & IPCFIFOCNT_SENDEMPTY)
-		NDS_makeIrq(proc, IRQ_BIT_IPCFIFO_SENDEMPTY);
-
-	//IPCFIFOCNT_RECVIRQEN may have been set so we may need to trigger this irq
-	if(cnt_l&IPCFIFOCNT_RECVIRQEN) if(!(cnt_l & IPCFIFOCNT_RECVEMPTY))
-		NDS_makeIrq(proc, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
-
-	T1WriteWord(MMU.MMU_MEM[proc][0x40], 0x184, cnt_l);
-	T1WriteWord(MMU.MMU_MEM[proc^1][0x40], 0x184, cnt_r);
+	if (val & 0x0008)
+		IPCFIFO9.Clear();
+	if ((val & 0x0004) && (!(IPCFIFOCnt9 & 0x0004)) && IPCFIFO9.IsEmpty())
+		NDS_makeIrq(0, IRQ_BIT_IPCFIFO_SENDEMPTY);
+	if ((val & 0x0400) && (!(IPCFIFOCnt9 & 0x0400)) && (!IPCFIFO7.IsEmpty()))
+		NDS_makeIrq(0, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
+	if (val & 0x4000)
+		IPCFIFOCnt9 &= ~0x4000;
+	IPCFIFOCnt9 = (val & 0x8404) | (IPCFIFOCnt9 & 0x4000);
 
 	NDS_Reschedule();
+}
+
+u32 IPC_FIFOgetCnt(u8 proc)
+{
+	u16 val = IPCFIFOCnt9;
+	if (IPCFIFO9.IsEmpty())     val |= 0x0001;
+	else if (IPCFIFO9.IsFull()) val |= 0x0002;
+	if (IPCFIFO7.IsEmpty())     val |= 0x0100;
+	else if (IPCFIFO7.IsFull()) val |= 0x0200;
+	return val;
 }
 
 // ========================================================= GFX FIFO
@@ -247,7 +198,7 @@ void GFX_FIFOsend(u8 cmd, u32 param)
 
 	GXF_FIFO_handleEvents();
 
-	NDS_RescheduleGXFIFO(1);
+	NDS_RescheduleGXFIFO(1); 
 }
 
 // this function used ONLY in gxFIFO

@@ -7,7 +7,7 @@
 //THE EMITER IS TAKEN FROM NULLDC PSP
 //CODE FROM Hlide AND Skmpt
 
-#define CODE_SIZE   (4*1024*1024)
+#define CODE_SIZE   (2*1024*1024)
 
 u32 LastAddr = 0;
 
@@ -19,6 +19,13 @@ u32   emit_getPointAdr() { return LastAddr;                                     
 u32   GetFreeSpace()     { return CODE_SIZE - LastAddr;                            }
 void  emit_Skip(u32 sz)  { LastAddr+=sz;                                           }
 u32   emit_SlideDelay()  { emit_Skip(-4); u32 rv=*(u32*)emit_GetPtr();  return rv; }
+u32   emit_Set(u32 _new)
+{
+	const u32 last = LastAddr;
+	LastAddr = _new;
+	return last;
+}
+
 
 //1+n opcodes
 void emit_mpush(u32 n, ...)
@@ -54,7 +61,7 @@ void emit_Write32(u32 data)
 	LastAddr+=4;
 }
 
-void insert_instruction(psp_insn_t insn)
+void insert_instruction(psp_insn_t insn) 
 {
 	emit_Write32(insn.word);
 }

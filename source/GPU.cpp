@@ -45,6 +45,8 @@
 #include "me.h"
 #include <pspaudiocodec.h>
 
+#include "arm7_hle.h"
+
 #ifdef FASTBUILD
 	#undef FORCEINLINE
 	#define FORCEINLINE
@@ -1867,9 +1869,9 @@ int Screen_Init()
 
 	disp_fifo.head = disp_fifo.tail = 0;
 
-	if (!IsEmu()){
+	/*if (!IsEmu()){
 		sceAudiocodecGetEDRAM((long unsigned int*)ME_GPU_Screen, 0x1002);
-	}else{
+	}else*/{
 		ME_GPU_Screen = GPU_Screen;
 
 		volatile u8 * buff = ME_GPU_Screen;
@@ -1879,6 +1881,7 @@ int Screen_Init()
 			*(buff++) = 0x7FFF;
 	}
 
+	printf("GPU_Screen: %08X\n", (u32)ME_GPU_Screen);
 	/*if (osd)  {delete osd; osd =NULL; }
 	osd  = new OSDCLASS(-1);*/
 
@@ -1892,11 +1895,10 @@ void Screen_Reset(void)
 	MainScreen.offset = 0;
 	SubScreen.offset = 256;
 
-	volatile u8* buff = GPU_Screen;
+	volatile u8* buff = ME_GPU_Screen;
 
-	memset((void*)GPU_Screen, 0, sizeof(GPU_Screen));
-	for (int i = 0; i < (256 * 192 * 4); i++)
-		*(buff++) = 0x7FFF;
+
+	memset((void*)GPU_Screen, 0x7FFF, sizeof(GPU_Screen));
 
 
 	//fast_memset((void*)&_screen[0], 0, sizeof(_screen));
@@ -2321,9 +2323,8 @@ template<bool SKIP> static void GPU_RenderLine_DispCapture(u16 l)
 
 int sub_index = 0;
 
-static INLINE void GPU_RenderLine_MasterBrightness(volatile NDS_Screen * screen, u16 l)
+static INLINE void GPU_RenderLine_MasterBrightness(GPU * gpu, u16 l)
 {
-	GPU * gpu = screen->gpu;
 
 	u8* dst = gpu->currDst;//GetFrameBuffer() + (l*1024) + sub_index;
 	u16 i16;
@@ -2482,7 +2483,10 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 {
 	GPU * gpu = screen->gpu;
 
+
 	sub_index = screen->offset;
+
+	
 
 	if (my_config.swap) 
 		if (sub_index == 0) sub_index = 512;
@@ -2548,7 +2552,7 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 		if(!(gpu->core == GPU_MAIN && (gpu->dispCapCnt.enabled || l == 0 || l == 191)))
 		{
 			gpu->currLine = l;
-			GPU_RenderLine_MasterBrightness(screen, l);
+			//GPU_RenderLine_MasterBrightness(gpu, l);
 			return;
 		}
 	}
@@ -2631,11 +2635,12 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 		//BUG!!! if someone is capturing and displaying both from the fifo, then it will have been 
 		//consumed above by the display before we get here
 		//(is that even legal? i think so)
+		StartScanline(l);
 		GPU_RenderLine_DispCapture<false>(l);
 		if (l == 191) { disp_fifo.head = disp_fifo.tail = 0; }
 	}else
 		//render mouse
-		if (my_config.cur && l == 190) {
+		if (my_config.cur && l == 191) {
 			int X = mouse.x << 1;
 			for (u16 yy = 0;yy < 5 && (yy+ mouse.y) < 190;++yy){
 				u8* framebuf = (u8*)(ME_GPU_Screen + 512)+psp_addrScreenLine[mouse.y +yy];//(u8*)(screen->gpu->currDst) /*+ (mouse.y) * 1024)*/; //GetFrameBuffer() + ((yy + y) * 1024);
@@ -2646,18 +2651,15 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 			}
 		}
 
-	if (l == 190) {
-		memcpy((void*)GPU_Screen, (void*)ME_GPU_Screen, 192 * 256 * 4);
-	}
 
-	GPU_RenderLine_MasterBrightness(screen, l);
+	/*if (l == 191) {
+		memcpy((void*)&GPU_Screen[(gpu->core == GPU_MAIN) ? 0 : 192 * 256 * 2], (void*)&ME_GPU_Screen[(gpu->core == GPU_MAIN) ? 0 : 192 * 256 * 2], 192 * 256 * 2);
+	}*/
+	//GPU_RenderLine_MasterBrightness(screen, l);
+
 	
 }
 
-void GPU_RenderGU(NDS_Screen* screen, u16 l, bool skip)
-{
-	
-}
 
 void gpu_savestate(EMUFILE* os)
 {
