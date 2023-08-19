@@ -1483,7 +1483,7 @@ u64 Sequencer::findNext()
 	if(divider.isEnabled()) next = min(next,divider.next());
 	if(sqrtunit.isEnabled()) next = min(next,sqrtunit.next());
 
-	//if(gxfifo.enabled) next = min(next,gxfifo.next());
+	if(gxfifo.enabled) next = min(next,gxfifo.next());
 
 	//if(readslot1.isEnabled()) next = _fast_min(next,readslot1.next());
 
@@ -1622,11 +1622,6 @@ static FORCEINLINE void armInnerLoop(s32 s32next)
 
 		if(arm9 <= timer)
 		{
-			if (nds.freezeBus & 0x1){
-				s32 cycles = sequencer.gxfifo.next();
-
-				arm9 = min(s32next, arm9 + cycles);
-			}else
 			if(!(NDS_ARM9.freeze & CPU_FREEZE_WAIT_IRQ) && !nds.freezeBus)
 			{
 				arm9 += armcpu_exec<ARMCPU_ARM9,jit>();
@@ -1641,7 +1636,7 @@ static FORCEINLINE void armInnerLoop(s32 s32next)
 			nds.idleCycles[0] += arm9-temp;
 			if (gxFIFO.size < 255) nds.freezeBus &= ~1;
 		}
-		if(arm7 <= timer)
+		/*if(arm7 <= timer)
 		{
 
 			bool cpufreeze = !!(NDS_ARM7.freeze & (CPU_FREEZE_WAIT_IRQ|CPU_FREEZE_OVERCLOCK_HACK));
@@ -1655,7 +1650,9 @@ static FORCEINLINE void armInnerLoop(s32 s32next)
 				arm7 = min(s32next, arm7 + kIrqWait);
 				nds.idleCycles[1] += arm7-temp;
 			}
-		}
+		}*/
+
+		arm7 = min(s32next, arm7 + kIrqWait);
 
 		timer = min(arm9,arm7);
 
