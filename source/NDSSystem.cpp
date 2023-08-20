@@ -219,7 +219,7 @@ void renderScreenFull()
 	for (int i = 0;i < 192;++i) 
 		GPU_RenderLine((upScreen ? &MainScreen : &SubScreen), i, frameSkipper.ShouldSkip2D());
 
-	SPU_Emulate_core();
+	//SPU_Emulate_core();
 
 	upScreen = !upScreen;
 }
@@ -248,7 +248,9 @@ int renderScreen(JobData data)
 
 		//if (!PSP_UC(Do2dRender)) continue;
 
-		while (!PSP_UC(Do2dRender)) {}
+		while (!PSP_UC(Do2dRender)) {
+			meUtilityDcacheWritebackInvalidateAll();
+		}
 
 		PSP_UC(Do2dRender) = false;
 		PSP_UC(RenderDone) = false;
@@ -1332,11 +1334,11 @@ static void execHardware_hstart_vcount_irq()
 		MMU.reg_IF_pending[ARMCPU_ARM9] &= ~(1<<IRQ_BIT_LCD_VMATCH);
 		NDS_makeIrq(ARMCPU_ARM9,IRQ_BIT_LCD_VMATCH);
 	}
-	if(MMU.reg_IF_pending[ARMCPU_ARM7] & (1<<IRQ_BIT_LCD_VMATCH))
+	/*if(MMU.reg_IF_pending[ARMCPU_ARM7] & (1<<IRQ_BIT_LCD_VMATCH))
 	{
 		MMU.reg_IF_pending[ARMCPU_ARM7] &= ~(1<<IRQ_BIT_LCD_VMATCH);
 		NDS_makeIrq(ARMCPU_ARM7,IRQ_BIT_LCD_VMATCH);
-	}
+	}*/
 }
 
 static void execHardware_hstart_vcount()
@@ -1446,6 +1448,9 @@ static void execHardware_hstart()
 	//trigger hstart dmas
 	
 	triggerDma(EDMAMode_HStart);
+
+	if(nds.hw_status.VCount<193)
+		StartScanline(nds.hw_status.VCount-1);
 
 	if(nds.hw_status.VCount<192)
 	{
@@ -1628,39 +1633,21 @@ static FORCEINLINE void armInnerLoop(s32 s32next)
 
 				timer = min(arm9,arm7);
 				nds_timer = nds_timer_base + timer;
-				continue;
-			}
-
-			s32 temp = arm9;
-			arm9 = min(s32next, arm9 + kIrqWait);
-			nds.idleCycles[0] += arm9-temp;
-			if (gxFIFO.size < 255) nds.freezeBus &= ~1;
-		}
-		/*if(arm7 <= timer)
-		{
-
-			bool cpufreeze = !!(NDS_ARM7.freeze & (CPU_FREEZE_WAIT_IRQ|CPU_FREEZE_OVERCLOCK_HACK));
-
-			if(!cpufreeze && !nds.freezeBus)
-			{
-				arm7 = s32next;
-				nds.idleCycles[1] += s32next;
 			}else{
-				s32 temp = arm7;
-				arm7 = min(s32next, arm7 + kIrqWait);
-				nds.idleCycles[1] += arm7-temp;
+				s32 temp = arm9;
+				arm9 = min(s32next, arm9 + kIrqWait);
+				nds.idleCycles[0] += arm9-temp;
+				if (gxFIFO.size < 255) nds.freezeBus &= ~1;
 			}
-		}*/
+		}
 
-		arm7 = min(s32next, arm7 + kIrqWait);
-
-		timer = min(arm9,arm7);
+		timer = min(arm9,s32next);
 
 		nds_timer = nds_timer_base + timer;
 	}
 
 	nds_arm9_timer = nds_timer_base+arm9;
-	nds_arm7_timer = nds_timer_base+arm7;
+	nds_arm7_timer = nds_timer_base+s32next;
 }
 
 template<bool FORCE>
@@ -1714,15 +1701,19 @@ void NDS_exec(s32 nb)
 
 	executeARM7Stuff();
 
-	EMU_SCREEN();
+	if (my_config.enable_sound)
+		SPU_Emulate_core();
 	
 	if (PSP_UC(RenderDone)){
+		EMU_SCREEN();
 		PSP_UC(Do2dRender) = true;
 		return;
 	}
 
-	if (IsEmu())
+	if (IsEmu()){
+		EMU_SCREEN();
 		renderScreenFull();
+	}
 
 }
 

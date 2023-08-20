@@ -177,6 +177,8 @@ static void desmume_cycle()
   if (my_config.showfps)
       ShowFPS(0,3);
 
+  NDS_exec<false>();
+
 	if (my_config.enable_sound)
 		SPU_Emulate_user();
 }
@@ -281,13 +283,14 @@ void ResetRom() {
 	execute = true;
 }
 
-const int TARGET_FPS = 30;
+const int TARGET_FPS = 60;
 const int FRAME_TIME_MICROSEC = 1000000 / TARGET_FPS;
+const int SINGLE_FRAME_TIME_MICROSEC = FRAME_TIME_MICROSEC / TARGET_FPS;
 
 int main(int argc, char **argv) {
 
   u32 last_fps_timing = 0;
-  u32 previous_time = 0;
+  u32 fps_base_tick = 0;
   u32 fps_frame_counter = 0;
 
   /* the firmware settings */
@@ -326,46 +329,37 @@ int main(int argc, char **argv) {
 
   EMU_SCREEN();
 
-  u8 _frameskip = my_config.frameskip;
-
   printf("Ram: %d\n", RAMAMOUNT());
 
   while(execute)
   {
       
-    if (my_config.frameskip == 0) 
-      desmume_cycle();
-    else{
-  
-      if (_frameskip--) {
-        desmume_cycle();
-        NDS_SkipNextFrame();
-      } else {
-        _frameskip = my_config.frameskip;
-      }
+    desmume_cycle();
 
+    for ( int i = 0; i < my_config.frameskip; i++ ) {
+        NDS_SkipNextFrame();
+        desmume_cycle();
     }
 
     u32 curr_timing = sceKernelGetSystemTimeLow();
 
-    NDS_exec<false>();
+    fps_frame_counter += 1 + my_config.frameskip;   
 
-    ++fps_frame_counter;
+    //if (my_config.fps_cap)
+    {
+        int delay =  (fps_base_tick + fps_frame_counter*1000000/TARGET_FPS) - curr_timing;
+
+        if (delay < -500000 || delay > 100000)
+          fps_base_tick = sceKernelGetSystemTimeLow();
+        else if (delay > 0)
+          sceKernelDelayThread(delay);
+    }
 
     if(curr_timing - last_fps_timing >= 1000000)
     {
       FPS_Counter = fps_frame_counter;//(fps_frame_counter * 1000000) / (curr_timing - last_fps_timing);
       fps_frame_counter = 0;
       last_fps_timing = curr_timing;
-    }
-
-    if (my_config.fps_cap){
-        const auto elapsedFrameTime = (curr_timing - previous_time);
-
-        if (elapsedFrameTime <= FRAME_TIME_MICROSEC)
-          sceKernelDelayThread(FRAME_TIME_MICROSEC - elapsedFrameTime);
-
-        previous_time = curr_timing;
     }
   }
 

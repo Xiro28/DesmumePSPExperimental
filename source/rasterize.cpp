@@ -149,7 +149,7 @@ public:
 	struct Vertex* __attribute__((aligned(32))) vertices;
 
 	union{
-		struct{u8 a; u8 b ; u8 g; u8 r;};
+		struct{ u8 r ; u8 g; u8 b; u8 a;};
 		u32 color;
 	}ArraytoColor;
 
@@ -186,7 +186,7 @@ public:
 			u16 __attribute__((aligned(16))) tbw = newTexture->bufferWidth;
 			sceGuTexImage(0, roundToExp2(newTexture->sizeX), roundToExp2(newTexture->sizeY), tbw, newTexture->decoded);
 			sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
-			//sceGuTexScale(newTexture->invSizeX, newTexture->invSizeY);
+			sceGuTexScale(newTexture->invSizeX, newTexture->invSizeY);
 		}
 	}
 
@@ -276,7 +276,6 @@ public:
 
 		sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT | GU_STENCIL_BUFFER_BIT);
 
-		sceKernelDcacheWritebackInvalidateAll();
 		for(int i=0; i < polyCount; i++)
 		{
 			GFX3D_Clipper::TClippedPoly &clippedPoly = engine->clipper.clippedPolys[i];
@@ -303,15 +302,14 @@ public:
 				lastTexParams = poly.texParam;
 				lastTexPalette = poly.texPalette;
 				sceGuDrawArray(GUPrimitiveType[poly.vtxFormat], GU_TRANSFORM_3D, 0, 0, &vertices[VertListIndex]);
+				
+				first = false;
 			}
 
 			if (lastViewport != poly.viewport){
 				viewport.decode(poly.viewport);
 				lastViewport = poly.viewport;
 			}
-
-			first = false;
-
 
 			for(int j=0;j<type;j++){
 				VERT &vert = clippedPoly.clipVerts[j];
@@ -364,6 +362,7 @@ public:
 				);
 			}
 
+			sceKernelDcacheWritebackRange(&vertices[VertListIndex], type * sizeof(Vertex));
 			sceGuDrawArray(GUPrimitiveType[poly.vtxFormat], GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, type, 0, &vertices[VertListIndex]);
 			VertListIndex += type;
 		}
@@ -377,7 +376,13 @@ static SoftRasterizerEngine mainSoftRasterizer;
 static RasterizerUnit<true> rasterizerUnit;
 
 void GU_callback(int i){
-	if (i == 1) memcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000),  192 * 256 * 4);
+	if (i == 1) {
+		//sceKernelDcacheWritebackInvalidateRange((u32*)(sceGeEdramGetAddr() + (int)0x44000), 192 * 256 * 4);
+		//sceDmacMemcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000),  192 * 256 * 4);
+		
+		//bottleneck
+		memcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000),  192 * 256 * 4);
+	}
 }
 
 static char SoftRastInit(void)

@@ -2635,7 +2635,6 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 		//BUG!!! if someone is capturing and displaying both from the fifo, then it will have been 
 		//consumed above by the display before we get here
 		//(is that even legal? i think so)
-		StartScanline(l);
 		GPU_RenderLine_DispCapture<false>(l);
 		if (l == 191) { disp_fifo.head = disp_fifo.tail = 0; }
 	}else
