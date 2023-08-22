@@ -56,9 +56,6 @@ void InitConfigParms(configured_features * params){
 	strcpy(configparms[c].name, "FPS Cap");
 	params->fps_cap = configparms[c].var;
 	c++;
-	strcpy(configparms[c].name, "Extreme ARM7 downclock");
-	params->extrmarm7down = configparms[c].var;
-	c++;
 	/*strcpy(configparms[c].name, "Hide screen");
 	params->hide_screen = configparms[c].var;
 	c++;*/
@@ -270,7 +267,9 @@ void DoConfig(configured_features * params)
 #ifdef LOWRAM
 	configparms[5].var = 1;
 	configparms[6].var = 1;
-#else
+#else.
+	configparms[1].var = 1;
+	configparms[2].var = 1;
 	configparms[6].var = 1;
 
 	//configparms[7].var = 1;
@@ -291,8 +290,6 @@ void DoConfig(configured_features * params)
 		pspDebugScreenPrintf("  Config Menu:\n\n");
 		pspDebugScreenPrintf("  Lang config: 0 = JAP, 1 = ENG, 2 = FRE, 3 = GER,\n");
 		pspDebugScreenPrintf("  4 = ITA, 5 = SPA, 6 = CHI, 7 = RES\n\n");
-		pspDebugScreenPrintf("  Hide Screen: 1 = Bottom, 2 = Top   \n\n");
-		pspDebugScreenPrintf("\n");
 		pspDebugScreenPrintf("\n");
 		InitConfigParms(params);
 		DisplayConfigParms();
@@ -314,24 +311,6 @@ void DoConfig(configured_features * params)
 							if (frameposconfig == -1)frameposconfig = 0;
 						}
 						else
-						if (strcmp(configparms[selposconfig].name, "Hide screen") == 0)
-						{
-							configparms[selposconfig].var = (screenpos--);
-							if (screenpos < 0) screenpos = 0;
-						}
-						else
-						if (strcmp(configparms[selposconfig].name, "Dynarec block size") == 0)
-						{
-							configparms[selposconfig].var = (DBLSZ--);
-							if (DBLSZ < 1) DBLSZ = 1;
-						}
-						else
-						if (strcmp(configparms[selposconfig].name, "Vcount ME start") == 0)
-						{
-							configparms[selposconfig].var = (VcounTT--);
-							if (VcounTT < 0) VcounTT = 0;
-						}
-						else
 						{
 							configparms[selposconfig].var = 0;
 						}
@@ -348,23 +327,6 @@ void DoConfig(configured_features * params)
 							{
 								configparms[selposconfig].var = frameposconfig++;
 								if (frameposconfig == 10)frameposconfig = 9;
-							}
-							else
-							if (strcmp(configparms[selposconfig].name, "Hide screen") == 0)
-							{
-								configparms[selposconfig].var = (screenpos++);
-								if (screenpos > 2) screenpos = 2;
-							}
-							else
-							if (strcmp(configparms[selposconfig].name, "Dynarec block size") == 0)
-							{
-								configparms[selposconfig].var = (DBLSZ++);
-								if (DBLSZ > 100) DBLSZ = 100;
-							}else
-							if (strcmp(configparms[selposconfig].name, "Vcount ME start") == 0)
-							{
-								configparms[selposconfig].var = (VcounTT++);
-								if (VcounTT > 262) VcounTT = 262;
 							}
 							else
 							{

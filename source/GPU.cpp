@@ -604,6 +604,8 @@ FORCEINLINE FASTCALL void GPU::_master_setFinal3dColor(int dstX, int srcX)
 	u8 alpha = color[3];
 	u8* dst = currDst;
 
+	if (red == 0xfa && green == 0xfa && blue == 0xfa) return; //transparent, I hope none of the games use this color
+
 	u32 final = RGB15(red,green,blue,alpha);
 	
 	HostWriteWord(dst, passing, final);
@@ -2645,7 +2647,7 @@ void GPU_RenderLine(volatile NDS_Screen * screen, u16 l, bool skip)
 				u8* framebuf = (u8*)(ME_GPU_Screen + 512)+psp_addrScreenLine[mouse.y +yy];//(u8*)(screen->gpu->currDst) /*+ (mouse.y) * 1024)*/; //GetFrameBuffer() + ((yy + y) * 1024);
 				for (unsigned int xx = 0; xx < 8; xx++)
 				{
-					*(framebuf + (X + xx)) = ~((*(framebuf + (X + xx)))>>1);
+					*(framebuf + (X + xx)) ^= ((*(framebuf + (X + xx)))>>1);
 				}
 			}
 		}

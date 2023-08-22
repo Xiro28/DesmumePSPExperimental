@@ -185,8 +185,8 @@ public:
 
 			u16 __attribute__((aligned(16))) tbw = newTexture->bufferWidth;
 			sceGuTexImage(0, roundToExp2(newTexture->sizeX), roundToExp2(newTexture->sizeY), tbw, newTexture->decoded);
-			sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
-			sceGuTexScale(newTexture->invSizeX, newTexture->invSizeY);
+			
+			//sceGuTexScale(newTexture->invSizeX, newTexture->invSizeY);
 		}
 	}
 
@@ -194,35 +194,69 @@ public:
 	{
 		const PolygonAttributes attr = thePoly.getAttributes();
 
+		static const int guTexBlendMode[4] = {GU_TFX_MODULATE, GU_TFX_DECAL, GU_TFX_MODULATE, GU_TFX_MODULATE};
+		sceGuTexFunc(guTexBlendMode[attr.polygonMode], GU_TCC_RGBA);
+
 		static const short GUDepthFunc[2] = { GU_LESS, GU_EQUAL };
-
 		//sceGuDepthFunc(GUDepthFunc[attr.enableDepthTest]);
+		
+		// Set up culling mode
+		static const uint8_t oglCullingMode[4] = {0, GU_CW, GU_CCW, 0};
+		uint8_t cullingMode = oglCullingMode[attr.surfaceCullingMode];
 
-		bool enableDepthWrite = true;
-
-		 if (attr.isTranslucent)
+		if (cullingMode)
 		{
-			//sceGuDisable(GU_STENCIL_TEST);
-			//glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			enableDepthWrite = (!attr.isTranslucent || ((attr.polygonMode == POLYGON_MODE_DECAL) && attr.isOpaque) || attr.enableAlphaDepthWrite) ? true : false;
+			sceGuEnable(GU_CULL_FACE);
+			sceGuFrontFace(cullingMode);
 		}
 		else
 		{
-			sceGuEnable(GU_STENCIL_TEST);
-			sceGuStencilFunc(GU_ALWAYS, 0x80, 0xFF);
-			sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
-			//glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			enableDepthWrite = true;
+			sceGuDisable(GU_CULL_FACE);
 		}
 
-		if (!attr.isOpaque)
+		bool enableDepthWrite = true;
+
+		if(attr.polygonMode == 3)
 		{
-			sceGuEnable(GU_ALPHA_TEST);
-			sceGuAlphaFunc(GU_GREATER,0,0xFF);
+			if(attr.polygonID == 0)
+			{
+				//when the polyID is zero, we are writing the shadow mask.
+				//set stencilbuf = 1 where the shadow volume is obstructed by geometry.
+				//do not write color or depth information.
+				sceGuStencilFunc(GU_ALWAYS, 65, 0xFF);
+				sceGuStencilOp(GU_KEEP, GU_REPLACE, GU_KEEP);
+
+				enableDepthWrite = false;
+			}
+			else
+			{
+				//when the polyid is nonzero, we are drawing the shadow poly.
+				//only draw the shadow poly where the stencilbuf==1.
+				//I am not sure whether to update the depth buffer here--so I chose not to.
+				sceGuStencilFunc(GU_ALWAYS, 65, 0xFF);
+				sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
+			}
+		}
+		else
+		{
+			if(attr.isTranslucent)
+			{
+				sceGuStencilFunc(GU_NOTEQUAL, attr.polygonID, 255);
+				sceGuStencilOp(GU_KEEP, GU_KEEP, GU_REPLACE);
+			}
+			else
+			{
+				sceGuStencilFunc(GU_ALWAYS, 64, 255);
+				sceGuStencilOp(GU_REPLACE, GU_REPLACE, GU_REPLACE);
+			}
 		}
 
-	//	sceGuDepthMask(enableDepthWrite);
+		if(attr.isTranslucent && !attr.enableAlphaDepthWrite)
+			enableDepthWrite = false;
+		
+		sceGuDepthMask(enableDepthWrite);
 	}
+
 
 	FORCEINLINE void mainLoop()
 	{
@@ -270,9 +304,33 @@ public:
 
 		sceGuDrawBufferList(GU_PSM_8888, (void*)renderTarget, 256);
 
-		sceGuClearColor(0);
+		sceGuEnable(GU_STENCIL_TEST);
+		sceGuDepthMask(1);
+
+		sceGuClearColor(0xfafafafa);
 		sceGuClearDepth(0);
 		sceGuClearStencil(0);
+		
+		sceGuEnable(GU_ALPHA_TEST);
+
+		if(gfx3d.state.enableAlphaTest && (gfx3d.state.alphaTestRef > 0))
+		{
+			sceGuAlphaFunc(GU_GEQUAL, divide5bitBy31_LUT[gfx3d.state.alphaTestRef] * 255, 0xff);
+		}
+		else
+		{
+			sceGuAlphaFunc(GU_GREATER, 0, 0xff);
+		}
+	
+		if(gfx3d.state.enableAlphaBlending)
+		{
+			sceGuEnable(GU_BLEND);
+		}
+		else
+		{
+			sceGuEnable(GU_BLEND);
+		}
+		
 
 		sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT | GU_STENCIL_BUFFER_BIT);
 
@@ -315,7 +373,7 @@ public:
 				VERT &vert = clippedPoly.clipVerts[j];
 				Vertex &out = vertices[VertListIndex + j];
 
-				ArraytoColor.a = 0xff;
+				ArraytoColor.a = (!poly.getAttributes().isWireframe && poly.getAttributes().isTranslucent) ? divide5bitBy31_LUT[gfx3d.renderState.alphaTestRef] * 255 : 255;
 				ArraytoColor.r = vert.color[0] << 3;
 				ArraytoColor.g = vert.color[1] << 3;
 				ArraytoColor.b = vert.color[2] << 3;
@@ -367,6 +425,11 @@ public:
 			VertListIndex += type;
 		}
 		
+
+		sceGuDisable(GU_STENCIL_TEST);
+		sceGuDisable(GU_CULL_FACE);
+		sceGuDepthFunc(GU_GEQUAL);
+
 		sceGuFinishId(1);	
 	}
 
@@ -381,7 +444,7 @@ void GU_callback(int i){
 		//sceDmacMemcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000),  192 * 256 * 4);
 		
 		//bottleneck
-		memcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000),  192 * 256 * 4);
+		memcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000), 192 * 256 * 4);
 	}
 }
 
@@ -393,7 +456,8 @@ static char SoftRastInit(void)
 		return result;
 	}
 
-	rasterizerUnit.vertices = (struct Vertex*)sceGuGetMemory(VERTLIST_SIZE * sizeof(struct Vertex));
+	
+	rasterizerUnit.vertices = (struct Vertex*)sceGuGetMemory(VERTLIST_SIZE * sizeof(struct Vertex)) + (int)0x110000;
 	rasterizerUnit.engine = &mainSoftRasterizer;
 	memset(&rasterizerUnit.vertices[0], 0, VERTLIST_SIZE * sizeof(struct Vertex));
 

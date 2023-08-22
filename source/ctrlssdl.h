@@ -61,6 +61,5 @@ void process_ctrls_event(u16 &keypad);
 
 void process_joystick_events( u16 *keypad);
 
-void DrawCursor(unsigned int x, unsigned int y);
 
 #endif /* CTRLSSDL_H */

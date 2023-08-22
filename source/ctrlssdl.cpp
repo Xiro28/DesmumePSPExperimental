@@ -34,10 +34,10 @@
 
 #define NB_KEYS 12
 
-const u16 default_psp_cfg_h[NB_KEYS] =
+const u32 default_psp_cfg_h[NB_KEYS] =
   { PSP_CTRL_CIRCLE,    //A
 	PSP_CTRL_CROSS,     //B
-	PSP_CTRL_SELECT,	//Select
+	PSP_CTRL_SELECT|PSP_CTRL_HOME,	//Select
 	PSP_CTRL_START,		//Start
 	PSP_CTRL_RIGHT,		//Right
 	PSP_CTRL_LEFT,		//Left
@@ -73,29 +73,6 @@ u8* GetFrameBuffer() {
 	return (u8*)(VRAM_START + top_padding);
 }
 
-void DrawCursor(unsigned int x, unsigned int y)
-{
-	return;
-	unsigned int fontAddr = 0;
-	//short shCurrentCursorColor = 0;
-
-	for (unsigned int yy = 0; yy < 4; yy++)
-	{
-		u8* framebuf = (GetFrameBuffer() + ((yy + y) * 1024)) + 512;
-
-		for (unsigned int xx = 0; xx < 8; xx++)
-		{
-			if (achCursor[fontAddr])
-				*(framebuf + (x + xx)) = ashCursorColors[0];
-			else
-				*(framebuf + (x + xx)) = ashCursorColors[2];
-
-			fontAddr++;
-		}
-	}
-
-	//*(GetFrameBuffer() + (5 +(3 + y) * 1024)) = ashCursorColors[(shCurrentCursorColor+1)%MAX_CURSOR_COLORS];
-}
 
 /* Load default joystick and keyboard configurations */
 void load_default_config(const u16 kbCfg[]){}
@@ -339,6 +316,8 @@ process_ctrls_event(u16 &keypad)
 	  sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 	  sceCtrlPeekBufferPositive(&pad, 1); 
 
+	  mouse.click = FALSE;
+
 	  if (pad.Lx < 10) {
 		  --mouse.x; --mouse.x;
 		  --mouse.x; --mouse.x;
@@ -361,24 +340,20 @@ process_ctrls_event(u16 &keypad)
 
 	  set_mouse_coord(mouse.x, mouse.y);
 
-
-	  if (pad.Buttons & PSP_CTRL_RTRIGGER && pad.Buttons & PSP_CTRL_CIRCLE) {
+	  const bool select_combo = (pad.Buttons & PSP_CTRL_HOME) && (pad.Buttons & PSP_CTRL_SELECT);
+	
+	  if (pad.Buttons & PSP_CTRL_HOME && !select_combo) {
+		Menu();
+	  }	else if (pad.Buttons & PSP_CTRL_SELECT) {
 	  	mouse.click = TRUE;
-		return;
-	  }else{
-		mouse.click = FALSE;
-	  }
+	  }	else{
+		for(int i=0;i<12;i++) {
 
-	  if (pad.Buttons & PSP_CTRL_HOME) {
-		  Menu();
+			if (pad.Buttons & default_psp_cfg_h[i])
+				ADD_KEY(keypad, KEYMASK_(i));
+			else
+				RM_KEY(keypad, KEYMASK_(i));
+		}
 	  }
 	  
-
-	  for(int i=0;i<12;i++) {
-
-		if (pad.Buttons & default_psp_cfg_h[i])
-			ADD_KEY(keypad, KEYMASK_(i));
-		else
-			RM_KEY(keypad, KEYMASK_(i));
-	  }
 }

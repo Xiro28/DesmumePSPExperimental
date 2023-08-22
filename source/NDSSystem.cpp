@@ -1449,6 +1449,8 @@ static void execHardware_hstart()
 	
 	triggerDma(EDMAMode_HStart);
 
+
+	//used by the hle
 	if(nds.hw_status.VCount<193)
 		StartScanline(nds.hw_status.VCount-1);
 

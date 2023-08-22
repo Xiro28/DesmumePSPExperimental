@@ -400,7 +400,7 @@ public:
 		//dump palette data for cache keying
 		if(palSize)
 		{
-			fast_memcpy(newitem->dump.palette, pal, palSize*2);
+			memcpy(newitem->dump.palette, pal, palSize*2);
 		}
 
 		//dump texture and 4x4 index data for cache keying

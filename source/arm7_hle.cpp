@@ -301,6 +301,10 @@ void OnIPCRequest_Powerman(u32 data)
     //printf("PM CMD %04X %04X\n", PM_Data[0], PM_Data[1]);
     switch (cmd)
     {
+    case 1:
+        MMU_writeToSPIData(PM_Data[0]); //?
+        SendIPCReply(0x8, 0x03008000);
+    break;
     case 3: // utility
         {
             switch (PM_Data[1] & 0xFF)
@@ -395,8 +399,7 @@ void OnIPCRequest_Powerman(u32 data)
         break;
 
     default:
-        printf("unknown PM request %08X\n", data);
-        SendIPCReply(0x8, 0x03008000);
+        printf("unknown PM request %08X, %08X, %08X\n", cmd, PM_Data[0], PM_Data[1]);
         break;
     }
 }
@@ -600,8 +603,10 @@ void OnIPCRequest()
 {
     u32 val = IPCFIFO9.Read();
 
-    if (IPCFIFO9.IsEmpty() && (IPCFIFOCnt9 & 0x0004))
+    if (IPCFIFO9.IsEmpty() && (IPCFIFOCnt9 & 0x0004)){
         NDS_makeIrq(0, IRQ_BIT_IPCFIFO_SENDEMPTY);
+        NDS_Reschedule();
+    }
 
     u32 service = val & 0x1F;
     u32 data = val >> 6;
@@ -642,6 +647,7 @@ void OnIPCRequest()
 
     case 0xA: // wifi
         if (flag) break;
+        printf("HLE: wifi request %08X\n", data);
        // Wifi::OnIPCRequest(data);
         break;
 
@@ -674,8 +680,6 @@ void OnIPCRequest()
         printf("HLE: unknown IPC request %08X service=%02X data=%08X flag=%d\n", val, service, data, flag);
         break;
     }
-
-    //NDS_Reschedule();
 }
 
 void StartScanline(u32 line)

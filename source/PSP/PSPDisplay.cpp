@@ -43,7 +43,7 @@ unsigned int __attribute__((aligned(64))) gulist[256 * 192 * 4];
 
 void*       frameBuffer   =  (void*)0;
 const void* doubleBuffer  =  (void*)0x44000;
-const void* depthBuffer   =  (void*)0x110000;
+const void* depthBuffer   =  (void*)0x88000;
 
 const int padding_top    = (1024 * 48);
 void*     DISP_POINTER   = (void*)VRAM_START + padding_top;
@@ -256,7 +256,7 @@ void EMU_SCREEN() {
 	sceGuEnable(GU_TEXTURE_2D);
 
 	sceGuTexMode(GU_PSM_5551, 0, 0, 0);
-	sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGB);
+	sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGB);
     sceGuTexImage(0, 512, 256, 512, (const void*)&GPU_Screen[0]);
 
 	DrawSliced(0);
@@ -290,7 +290,7 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 
 	//sceGuDrawBufferList(GU_PSM_5551, (void*)depthBuffer, 512);
 
-	//sceGuDepthRange(65535, 0);
+	sceGuDepthRange(65535, 0);
 
 	// Background color and disable scissor test
 	// because it is enabled by default with no size sets

@@ -381,6 +381,9 @@ void Reset()
 
     Version = 0;
 
+    /*if (!memcmp(gameInfo.header.gameCode,"ASM", 3)) // ASMx / Super Mario 64 DS
+        Version = 1;*/
+
    /* if (NDSCart::CartROM)
     {
         u32 gamecode = *(u32*)&NDSCart::CartROM[0xC];
@@ -1311,9 +1314,14 @@ void ProcessCommands()
 
             case 0x1A:
                 {
-                    //
-                    printf("unknown sound cmd %08X, %08X %08X %08X %08X\n",
-                       cmd, args[0], args[1], args[2], args[3]);
+                    if (BIT25(args[0]))
+                        SharedMem = args[0];
+                    else{
+                        //SharedMem += args[0];
+                        printf("%08X\n", SharedMem);
+                        printf("unknown sound cmd %08X, %08X %08X %08X %08X\n",
+                        cmd, args[0], args[1], args[2], args[3]);
+                    }
                 }
                 break;
 

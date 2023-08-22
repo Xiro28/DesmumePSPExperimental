@@ -144,17 +144,6 @@ void PrintfXY(const char* text, int x, int y) {
 	pspDebugScreenPrintf(text);
 }
 
-void DrawTouchPointer()
-{
-    if (!my_config.cur) return;
-
-	int x = mouse.x;
-	int y = mouse.y;
-
-	x <<= 1;
-
-	DrawCursor(x, y);
-}
 
 
 static void desmume_cycle()
@@ -169,7 +158,7 @@ static void desmume_cycle()
       NDS_releaseTouch();
 	  }
 	  else {
-		   NDS_setTouchPos(mouse.x, mouse.y);
+		  NDS_setTouchPos(mouse.x, mouse.y);
 	  }
 
     update_keypad(pad);     /* Update keypad */
