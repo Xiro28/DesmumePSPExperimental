@@ -74,7 +74,7 @@ inline void* vrelptr(void* ptr)
 	return (void*)((u32)ptr & ~__MEM_START);
 }
 
-volatile u32 _screen[GFX3D_FRAMEBUFFER_WIDTH * GFX3D_FRAMEBUFFER_HEIGHT];
+//volatile u32 _screen[GFX3D_FRAMEBUFFER_WIDTH * GFX3D_FRAMEBUFFER_HEIGHT];
 
 
 CACHE_ALIGN const float divide5bitBy31_LUT[32] = { 0.0,             0.0322580645161, 0.0645161290323, 0.0967741935484,
@@ -260,32 +260,32 @@ public:
 
 	FORCEINLINE void mainLoop()
 	{
+		//Draw 3D only if necessary
+		if (!(((REG_DISPx*)&MMU.ARM9_REG[0])->dispx_DISPCNT.bits.BG0_3D))
+			return;
 
 		using std::min;
 		using std::max;
 
-		const size_t polyCount = engine->clippedPolyCounter;
+		const size_t polyCount = engine->polylist->count; //engine->clippedPolyCounter;
 
-		if (polyCount == 0) {
-			memset((u32*)&_screen[0], 0,  192 * 256 * 4);
-			return;
-		}
-
-		const void* renderTarget __attribute__((aligned(16))) = (void*)0x44000;
-
-		static const int GUPrimitiveType[] = { GU_TRIANGLES , GU_TRIANGLE_FAN , GU_TRIANGLES , GU_TRIANGLE_FAN , GU_LINE_STRIP, GU_LINE_STRIP,GU_LINE_STRIP,GU_LINE_STRIP };
+		static const int GUPrimitiveType[] = { GU_TRIANGLE_FAN , GU_TRIANGLE_FAN, GU_TRIANGLES , GU_TRIANGLES , GU_LINE_STRIP, GU_TRIANGLE_FAN,GU_LINE_STRIP,GU_TRIANGLE_FAN };
 
 		static const int sz[] = { 3, 4, 3, 4, 3, 4, 3, 4 };
 
 		bool first = true;
 		int VertListIndex = 0;
 
+		const bool _3dOnTop = MainScreen.offset == 0;
+
 		const ScePspFMatrix4 _matrx __attribute__((aligned(16))) = {
 			{0.998f, 0, 0, 0},
 			{ 0, 0.998f, 0, 0},
-			{ 0, 0, 1.f, 0},
+			{ 0, 1.f, 1.f, 0},
 			{ 0.001f, 0.001f, 0, 1.f}
 		};
+
+		sceGuEnable(GU_STENCIL_TEST);
 
 		VIEWPORT viewport;
 
@@ -294,83 +294,95 @@ public:
 		u32 lastPolyAttr = 0;
 		u32 lastViewport = 0xFFFFFFFF;
 
-		sceGuSync(0, 0);
-		sceGuStart(GU_DIRECT, gulist);
-
 		sceGuSetMatrix(GU_PROJECTION, &_matrx);
 		sceGuSetMatrix(GU_TEXTURE, &_matrx);
 		sceGuSetMatrix(GU_MODEL, &_matrx);
 		sceGuSetMatrix(GU_VIEW, &_matrx);
 
-		sceGuDrawBufferList(GU_PSM_8888, (void*)renderTarget, 256);
-
-		sceGuEnable(GU_STENCIL_TEST);
-		sceGuDepthMask(1);
-
-		sceGuClearColor(0xfafafafa);
-		sceGuClearDepth(0);
-		sceGuClearStencil(0);
-		
-		sceGuEnable(GU_ALPHA_TEST);
-
-		if(gfx3d.state.enableAlphaTest && (gfx3d.state.alphaTestRef > 0))
-		{
-			sceGuAlphaFunc(GU_GEQUAL, divide5bitBy31_LUT[gfx3d.state.alphaTestRef] * 255, 0xff);
-		}
-		else
-		{
-			sceGuAlphaFunc(GU_GREATER, 0, 0xff);
-		}
-	
-		if(gfx3d.state.enableAlphaBlending)
-		{
-			sceGuEnable(GU_BLEND);
-		}
-		else
-		{
-			sceGuEnable(GU_BLEND);
-		}
-		
-
-		sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT | GU_STENCIL_BUFFER_BIT);
+		int batching = 0;
+		int batch_start = 0;
+		size_t batched_draws = 0;
+		int lastPolyPrimitive = GU_TRIANGLES;
 
 		for(int i=0; i < polyCount; i++)
 		{
-			GFX3D_Clipper::TClippedPoly &clippedPoly = engine->clipper.clippedPolys[i];
+			/*GFX3D_Clipper::TClippedPoly &clippedPoly = engine->clipper.clippedPolys[i];
 			POLY &poly = *clippedPoly.poly;
-			int type = clippedPoly.type;
+			int type = clippedPoly.type;*/
 
-			if (first || lastPolyAttr != poly.polyAttr)
+			POLY &poly = engine->polylist->list[engine->indexlist->list[i]];
+			int type = poly.type;
+
+			if (lastPolyAttr != poly.polyAttr || i == 0)
 			{
+				if (batching){
+					//sceKernelDcacheWritebackRange(&vertices[batch_start], batched_draws * sizeof(Vertex));
+					sceGuDrawArray(lastPolyPrimitive, GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, batched_draws, 0, &vertices[batch_start]);
+				}
+
 				lastPolyAttr = poly.polyAttr;
 				
 				SetupPoly(poly);
 
 				polyAttr.setup(poly.polyAttr);
+				batching = 0;
 			}
 
 			/*if (!polyAttr.isVisible(poly.backfacing) && !polyAttr.drawBackPlaneIntersectingPolys)
 				continue;*/
 
 
-			if (first ||lastTexParams != poly.texParam || lastTexPalette != poly.texPalette)
+			if (lastTexParams != poly.texParam || lastTexPalette != poly.texPalette || i == 0)
 			{
+
+				if (batching){
+					//sceKernelDcacheWritebackRange(&vertices[batch_start], batched_draws * sizeof(Vertex));
+					sceGuDrawArray(lastPolyPrimitive, GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, batched_draws, 0, &vertices[batch_start]);
+				}
+
 				this->SetupTexture(poly);
 
 				lastTexParams = poly.texParam;
 				lastTexPalette = poly.texPalette;
-				sceGuDrawArray(GUPrimitiveType[poly.vtxFormat], GU_TRANSFORM_3D, 0, 0, &vertices[VertListIndex]);
+				sceGuDrawArray(lastPolyPrimitive, GU_TRANSFORM_3D, 0, 0, &vertices[VertListIndex]);
 				
-				first = false;
+				batching = 0;
 			}
 
-			if (lastViewport != poly.viewport){
+			if (lastViewport != poly.viewport || i == 0){
+
+				if (batching){
+					//sceKernelDcacheWritebackRange(&vertices[batch_start], batched_draws * sizeof(Vertex));
+					sceGuDrawArray(lastPolyPrimitive, GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, batched_draws, 0, &vertices[batch_start]);
+				}
 				viewport.decode(poly.viewport);
+
+				sceGuViewport(0, 192,512,384);
+				//sceGuViewport(viewport.x, viewport.y, viewport.width, viewport.height);
 				lastViewport = poly.viewport;
+
+				batching = 0;
 			}
 
-			for(int j=0;j<type;j++){
-				VERT &vert = clippedPoly.clipVerts[j];
+			const int polyPrimitive = GUPrimitiveType[poly.vtxFormat];
+			static const unsigned int indexIncrementLUT[] = {4, 4, 3, 4, 3, 4, 3, 4};
+
+			int vertexCount = indexIncrementLUT[poly.vtxFormat];
+
+			//printf("poly.vtxFormat: %d\n", poly.vtxFormat);
+		
+			if (polyPrimitive != lastPolyPrimitive || polyPrimitive == GU_LINE_STRIP) {
+				if (batching){
+					//sceKernelDcacheWritebackRange(&vertices[batch_start], batched_draws * sizeof(Vertex));
+					sceGuDrawArray(lastPolyPrimitive, GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, batched_draws, 0, &vertices[batch_start]);
+				}
+				lastPolyPrimitive = polyPrimitive;
+				batching = 0;
+			}
+
+			for(int j=0;j<vertexCount;j++){
+				//VERT &vert = clippedPoly.clipVerts[j];
+				VERT &vert = engine->vertlist->list[poly.vertIndexes[j]];
 				Vertex &out = vertices[VertListIndex + j];
 
 				ArraytoColor.a = (!poly.getAttributes().isWireframe && poly.getAttributes().isTranslucent) ? divide5bitBy31_LUT[gfx3d.renderState.alphaTestRef] * 255 : 255;
@@ -418,35 +430,40 @@ public:
 					: "m"(vert.x), "m"(viewport.x)
 					: "memory"
 				);
+
+				if (!_3dOnTop)
+					out.x = (out.x + 240); 
+
+				out.y = (out.y + 40);
 			}
 
-			sceKernelDcacheWritebackRange(&vertices[VertListIndex], type * sizeof(Vertex));
-			sceGuDrawArray(GUPrimitiveType[poly.vtxFormat], GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, type, 0, &vertices[VertListIndex]);
-			VertListIndex += type;
+
+			if (batching) {
+				batched_draws += vertexCount;
+			} else {
+				batch_start = VertListIndex;
+				batched_draws = vertexCount;
+				batching = 1;
+			}
+			VertListIndex += vertexCount;
 		}
+
+		//sceKernelDcacheWritebackRange(&vertices[batch_start], batched_draws * sizeof(Vertex));
+		sceGuDrawArray(lastPolyPrimitive, GU_TEXTURE_32BITF|GU_COLOR_8888|GU_VERTEX_32BITF|GU_TRANSFORM_2D, batched_draws, 0, &vertices[batch_start]);
 		
 
 		sceGuDisable(GU_STENCIL_TEST);
 		sceGuDisable(GU_CULL_FACE);
 		sceGuDepthFunc(GU_GEQUAL);
-
-		sceGuFinishId(1);	
 	}
+	
 
 };
 
 static SoftRasterizerEngine mainSoftRasterizer;
 static RasterizerUnit<true> rasterizerUnit;
 
-void GU_callback(int i){
-	if (i == 1) {
-		//sceKernelDcacheWritebackInvalidateRange((u32*)(sceGeEdramGetAddr() + (int)0x44000), 192 * 256 * 4);
-		//sceDmacMemcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000),  192 * 256 * 4);
-		
-		//bottleneck
-		memcpy((u32*)&_screen[0], (u32*)(sceGeEdramGetAddr() + (int)0x44000), 192 * 256 * 4);
-	}
-}
+void GU_callback(int i){}
 
 static char SoftRastInit(void)
 {
@@ -457,11 +474,11 @@ static char SoftRastInit(void)
 	}
 
 	
-	rasterizerUnit.vertices = (struct Vertex*)sceGuGetMemory(VERTLIST_SIZE * sizeof(struct Vertex)) + (int)0x110000;
+	rasterizerUnit.vertices = (struct Vertex*)sceGuGetMemory(1024 * sizeof(struct Vertex)) + (int)0x110000;
 	rasterizerUnit.engine = &mainSoftRasterizer;
-	memset(&rasterizerUnit.vertices[0], 0, VERTLIST_SIZE * sizeof(struct Vertex));
+	memset(&rasterizerUnit.vertices[0], 0, 1024 * sizeof(struct Vertex));
 
-	sceGuSetCallback(GU_CALLBACK_FINISH, GU_callback);
+	//sceGuSetCallback(GU_CALLBACK_FINISH, GU_callback);
 
 
 	TexCache_Reset();
@@ -492,14 +509,14 @@ static void SoftRastConvertFramebuffer(){ }
 
 SoftRasterizerEngine::SoftRasterizerEngine()
 {
-	clipper.clippedPolys = new GFX3D_Clipper::TClippedPoly[POLYLIST_SIZE];
+	//clipper.clippedPolys = new GFX3D_Clipper::TClippedPoly[POLYLIST_SIZE];
 }
 
 
 
 void SoftRasterizerEngine::performClipping()
 {
-	clipper.reset();
+	/*clipper.reset();
 
 	const size_t polyCount = polylist->count;
 
@@ -527,9 +544,9 @@ void SoftRasterizerEngine::performClipping()
 			facing += (verts[j+1]->y + verts[j]->y) * (verts[j+1]->x - verts[j]->x);
 		
 		poly->backfacing = (facing < 0);*/
-	}
+	/*}
 
-	clippedPolyCounter = clipper.clippedPolyCounter;
+	clippedPolyCounter = clipper.clippedPolyCounter;*/
 }
 
 

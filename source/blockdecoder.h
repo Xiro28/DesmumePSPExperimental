@@ -60,7 +60,16 @@ static uint32_t block_procnum;
         }
 
 enum op{
+    
+    // Special custom opcodes
     OP_NOP = 0,
+    OP_MEMCPY,
+    OP_BXC,
+    OP_MRC_MCR,
+    OP_FAST_MUL,
+
+
+
     OP_ITP,
     OP_AND,
     OP_ORR,
@@ -80,6 +89,8 @@ enum op{
     OP_LDRH,
     OP_STRH,
     OP_STMIA,
+
+    OP_MLA,
 
     OP_LSR_0,
 
@@ -104,6 +115,7 @@ enum opType{
     PRE_OP_ASR_REG,
 
     PRE_OP_REG_OFF,
+    PRE_OP_M_REG_OFF,
     PRE_OP_REG_PRE_P,
     PRE_OP_REG_POST_P,
     PRE_OP_REG_PRE_M,
@@ -116,6 +128,9 @@ enum opType{
     PRE_OP_POST_M,
 
     PRE_OP_NONE,
+    OP_32BIT,
+    OP_16BIT,
+    OP_8BIT,
     NOFLAGS
 };
 
@@ -169,7 +184,11 @@ class block{
 
             opcodes.push_back(opcode(_op, rd, rs1, rs2, imm, preOpType, pc, condition, extra_flags));
 
-            if (_op == OP_ITP || _op == OP_SWI) return;
+            containsITP = containsITP || (_op == OP_ITP);
+
+            if (_op == OP_ITP) return;
+
+            noReadWriteOP = noReadWriteOP ? !(_op == OP_LDR || _op == OP_LDRH) : false;
             
             onlyITP = false;
 
@@ -182,7 +201,15 @@ class block{
 
             block_hash[0] = '\0';
 
+            idleLoop = false;
             onlyITP = true;
+            uses_flags = false;
+            noReadWriteOP = true;
+            manualPrefetch = false;
+            containsITP = false;
+
+            branch_addr = 0;
+            start_addr = 0;
             
             for (int i = 0; i < 16; ++i){
                 reg_usage[i + 1] = 0;
@@ -209,6 +236,8 @@ class block{
         bool uses_flags = false;
         bool manualPrefetch = false;
         bool onlyITP = true;
+        bool containsITP = false;
+        bool idleLoop = false;
 
         u32 branch_addr = 0;
         u32 start_addr = 0;

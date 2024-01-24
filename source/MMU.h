@@ -361,9 +361,12 @@ struct MMU_struct
 	static u8 * MMU_MEM[2][256];
 	static u32 MMU_MASK[2][256];
 
-	
+	//put ARM9_DTCM and MAIN_MEM near DCTM region so that we can easily access them with one addr
 
+	u8 ARM9_DTCM[0x4000];
 	u32 DTCMRegion;
+	__attribute__((align(64))) u8 MAIN_MEM[4 * 1024 * 1024]; //expanded from 4MB to 8MB to support debug consoles
+
 	u32 ITCMRegion;
 
 	u16 timer[2][4];
@@ -424,7 +427,6 @@ struct MMU_struct
 	u8 ARM9_OAM[0x800];
 
 	//ARM9 mem
-	u8 ARM9_DTCM[0x4000];
 	u8 ARM9_ITCM[0x8000];
 
 	//32KB of shared WRAM - can be switched between ARM7 & ARM9 in two blocks
@@ -453,7 +455,6 @@ struct MMU_struct
 	u8 ARM9_REG[0x100000]; //this variable is evil and should be removed by correctly emulating all registers.
 	//u8 ARM9_REG[0x200000]; //this variable is evil and should be removed by correctly emulating all registers.
 
-	__attribute__((align(64))) u8 MAIN_MEM[4 * 1024 * 1024]; //expanded from 4MB to 8MB to support debug consoles
 };
 
 

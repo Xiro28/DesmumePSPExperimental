@@ -94,6 +94,21 @@ void rtcRecv()
 {
 	//INFO("RTC Read command 0x%02X\n", (rtc.cmd >> 1));
 
+	//get the current time with c time functions
+	time_t rawtime;
+	struct tm * timeinfo;
+
+	time (&rawtime);
+	struct tm *currTm = localtime(&rawtime);
+
+	u32 seconds = currTm->tm_sec;
+	u32 minutes = currTm->tm_min;
+	u32 hours = currTm->tm_hour;
+	u32 day = currTm->tm_mday + 1;
+	u32 month = currTm->tm_mon + 1;
+	u32 year = currTm->tm_year + 1900;
+	u32 dayOfWeek = currTm->tm_wday;
+
 	memset(&rtc.data[0], 0, sizeof(rtc.data));
 	switch (rtc.cmd >> 1)
 	{
@@ -111,9 +126,10 @@ void rtcRecv()
 			{
 				//INFO("RTC: read date & time\n");
 				//DateTime tm = rtcGetTime();
-				rtc.data[0] = toBCD(15);   //tm.get_Year() % 100);
-				rtc.data[1] = toBCD(06);   //tm.get_Month());
-				rtc.data[2] = toBCD(15);   //tm.get_Day());
+
+				rtc.data[0] = toBCD(2023);   //tm.get_Year() % 100);
+				rtc.data[1] = toBCD(month);   //tm.get_Month());
+				rtc.data[2] = toBCD(day);   //tm.get_Day());
 
 				//zero 24-apr-2010 - this is nonsense.
 				//but it is so wrong, someone mustve thought they knew what they were doing, so i am leaving it...
@@ -123,13 +139,13 @@ void rtcRecv()
 				//do this instead (gbatek seems to say monday=0 but i don't think that is right)
 				//0=sunday is necessary to make animal crossing behave
 				//maybe it means "custom assignment" can be specified by the game
-				rtc.data[3] = 3; //tm.get_DayOfWeek();
+				rtc.data[3] = dayOfWeek; //tm.get_DayOfWeek();
 
-				int hour = 11;  //tm.get_Hour(); 
-				if (!(rtc.regStatus1 & 0x02)) hour %= 12;
-				rtc.data[4] = ((hour < 12) ? 0x00 : 0x40) | toBCD(hour);
-				rtc.data[5] =  toBCD(25); //tm.get_Minute());
-				rtc.data[6] =  toBCD(34); //tm.get_Second());
+				
+				if (!(rtc.regStatus1 & 0x02)) hours %= 12;
+				rtc.data[4] = ((hours < 12) ? 0x00 : 0x40) | toBCD(hours);
+				rtc.data[5] =  toBCD(minutes); //tm.get_Minute());
+				rtc.data[6] =  toBCD(seconds); //tm.get_Second());
 				break;
 			}
 		case 3:				// time
@@ -138,9 +154,9 @@ void rtcRecv()
 				//DateTime tm = rtcGetTime();
 				int hour = 11;  //tm.get_Hour(); 
 				//if (!(rtc.regStatus1 & 0x02)) hour %= 12;
-				rtc.data[0] = ((hour < 12) ? 0x00 : 0x40) | toBCD(hour);
-				rtc.data[1] =  toBCD(25);  //tm.get_Minute());
-				rtc.data[2] =  toBCD(34);  //tm.get_Second());
+				rtc.data[0] = ((hour < 12) ? 0x00 : 0x40) | toBCD(hours);
+				rtc.data[1] =  toBCD(minutes);  //tm.get_Minute());
+				rtc.data[2] =  toBCD(seconds);  //tm.get_Second());
 				break;
 			}
 		case 4:				// freq/alarm 1

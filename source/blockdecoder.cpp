@@ -10,8 +10,17 @@
 
 bool instr_does_prefetch(u32 opcode);
 
-inline void loadReg(psp_gpr_t psp_reg, s8 nds_reg) { if (nds_reg != -1) emit_lw(psp_reg, RCPU, _reg(nds_reg)); }
-inline void storeReg(psp_gpr_t psp_reg, s8 nds_reg) { if (nds_reg != -1) emit_sw(psp_reg, RCPU, _reg(nds_reg)); }
+inline void loadReg(psp_gpr_t psp_reg, s32 nds_reg) { if (nds_reg != -1) emit_lw(psp_reg, RCPU, _reg(nds_reg)); }
+inline void storeReg(psp_gpr_t psp_reg, s32 nds_reg) { if (nds_reg != -1) emit_sw(psp_reg, RCPU, _reg(nds_reg)); }
+
+#define offsetBetween(x, x2) (((u32)&x) - ((u32)&x2[0]))
+#define offsetBetween2(x, x2) (((u32)&x2[0]) - ((u32)&x))
+
+u32 mem_off = 0;
+u32 dtcm_addr_arr = 0;
+int intr_instr = 0;
+
+u32 start_block = 0;
 
 #include "psp_sra.h"
 
@@ -97,7 +106,7 @@ void emit_li(u32 reg,u32 data,u32 sz=0)
 }
 
 //load upper address
-u32 emit_lua(u32 reg,u32 data)
+inline u32 emit_lua(u32 reg,u32 data)
 {
     u32 hi = data>>16;
     u32 lo = data&0xFFFF;
@@ -205,13 +214,13 @@ void emit_prefetch(const u8 isize, bool saveR15, bool is_ITP){
 } 
 
 
-void emit_bic(u32 dst,u32 a0, u32 a1)
+INLINE void emit_bic(u32 dst,u32 a0, u32 a1)
 {
     emit_not(a1, a1);
 	emit_and(dst, a0, a1);
 }
 
-void emit_bici(u32 dst,u32 a0, u32 a1)
+INLINE void emit_bici(u32 dst,u32 a0, u32 a1)
 {
 	emit_andi(dst, a0, ~a1);
 }
@@ -219,7 +228,7 @@ void emit_bici(u32 dst,u32 a0, u32 a1)
 
 
 #define gen_nativeOP(opType, n_op, n_op_imm, sign) \
-template <bool imm, int rev> void arm_##opType(opcode &op){ \
+template <bool imm, bool rev> void arm_##opType(opcode &op){ \
     loadReg(psp_a0, op.rs1); \
     if (imm){ \
         if (!rev && is_##sign##16(op.imm)) \
@@ -244,7 +253,7 @@ template <bool imm, int rev> void arm_##opType(opcode &op){ \
 }
 
 #define genThumb_nativeOP(opType, n_op, n_op_imm, sign) \
-template <bool imm, int rev> void thumb_##opType(opcode &op){ \
+template <bool imm, bool rev> void thumb_##opType(opcode &op){ \
     loadReg(psp_a0, op.rs1); \
     if (imm){ \
         if (!rev && is_##sign##16(op.imm)) \
@@ -283,55 +292,115 @@ void block::optimize_basicblock(){
 
     //opcode &last_op = opcodes.back();
 
+
+    //check if the block is a data invalidate block
+    if (opcodes.size() == 4){
+        if (opcodes[0]._op == OP_MOV && opcodes[1]._op == OP_MRC_MCR){
+            printf("data invalidate block detected\n");
+
+            //do just the last jump
+            opcodes.erase(opcodes.begin(), opcodes.begin() + 3);
+
+            printf("block size: %d\n", opcodes.size());
+        }
+    }
+
+
+
     for(opcode& op : opcodes){
 
         if (prev_op && prev_op->_op == OP_ITP && op.condition == -1 && op._op == OP_ITP) op.extra_flags = EXTFL_SKIPSAVEFLAG;
         if (prev_op && prev_op->_op == OP_ITP && prev_op->condition == -1) prev_op->extra_flags = EXTFL_SKIPLOADFLAG;
 
         // combine branches (slows down the emulator for some strange reason)
-        /*if (prev_op && op.op_pc != last_op.op_pc){
+        /*if (prev_op && op.op_pc != opcodes.back().op_pc){
             //skip only the ops that doesn't change the flags
-            if (( prev_op->_op <= OP_MVN) && prev_op->condition == op.condition && op.condition != -1){
+            if (( prev_op->_op <= OP_MVN && prev_op->_op > OP_ITP && op._op > OP_ITP && op._op <= OP_MVN)  && prev_op->condition == op.condition && op.condition != -1){
                 if (prev_op->extra_flags & EXTFL_SAVECOND) prev_op->extra_flags ^= EXTFL_SAVECOND;
-                if (prev_op->extra_flags & EXTFL_RELOADPC) prev_op->extra_flags ^= EXTFL_RELOADPC;
+                //if (prev_op->extra_flags & EXTFL_RELOADPC) prev_op->extra_flags ^= EXTFL_RELOADPC;
                 op.extra_flags |= EXTFL_MERGECOND;
-                op.extra_flags |= EXTFL_RELOADPC;
+
+                if ( prev_op && (prev_op->_op == OP_MOV || prev_op->_op == OP_MVN || prev_op->_op == OP_MOV_S || prev_op->_op == OP_MEMCPY) && 
+                    (op._op >= OP_AND && op._op <= OP_SUB || (op._op >= OP_MOV && op._op <= OP_STRH)) && 
+                    prev_op->rd == op.rs2 && (prev_op->preOpType == PRE_OP_LSL_IMM || prev_op->preOpType == PRE_OP_ASR_IMM) && prev_op->condition == op.condition) {
+
+                    if (op.rd == prev_op->rd) prev_op->rd = -1;
+                    op.rs2 = -1;
+                }
+
+                //op.extra_flags |= EXTFL_RELOADPC;
             }
         }*/
 
         //check for useless operation
-        /*if (op.preOpType == PRE_OP_IMM && (op._op == OP_ORR || op._op == OP_EOR || op._op == OP_SUB) && (op.imm == 0)) {
-            //printf("Translated to move - OP: %x\n", op._op);
-            op._op = OP_MOV;
-            op.preOpType = PRE_OP_NONE;
-        }else if (op._op == OP_AND && op.preOpType == PRE_OP_IMM && (op.imm == 0)) {
-            //printf("Translated AND to mov0\n");
-            op._op = OP_MOV;
-            op.imm = 0;
-            op.preOpType = PRE_OP_IMM;
-        }else if (op._op == OP_RSB && (op.imm == 0)) {
-            //printf("Translated RSB to neg\n");
-            op._op = OP_NEG; 
-        }else if (op.preOpType == PRE_OP_LSR_IMM && (op.imm == 0)) {
-            //printf("Translated PRE_OP_LSR_IMM OP to MOV\n");
-            op._op = OP_MOV;
-            op.preOpType = PRE_OP_NONE;
-        }else if (op._op == OP_MOV && op.rs1 == op.rd && op.preOpType == PRE_OP_NONE) {
-            op._op = OP_NOP;
-            op.rd = 0;
-        }*/ 
+        /*if (op.preOpType == PRE_OP_IMM && (op.imm == 0))
+        {
+            if ((op._op == OP_ORR || op._op == OP_EOR || op._op == OP_SUB)) {
+                printf("Translated to move - OP: %x\n", op._op);
+                op._op = OP_MOV;
+                op.preOpType = PRE_OP_NONE;
+            }else if (op._op == OP_AND) {
+                printf("Translated AND to mov0\n");
+                op._op = OP_MOV;
+                op.imm = 0;
+                op.preOpType = PRE_OP_IMM;
+            }else if (op._op == OP_RSB) {
+                //printf("Translated RSB to neg\n");
+                //printf("rd : %d op.rs1: %d, op.rs2: %d\n", op.rd, op.rs1, op.rs2);
+                op._op = OP_NEG; 
+            } 
+        }
+
+
+        // optimize mul if we can
+        /*if (prev_op && prev_op->_op == OP_MOV && prev_op->preOpType == PRE_OP_IMM && op._op == OP_MUL && prev_op->rd == op.rs2){
+            //if (op.rs1 == op.rs2)
+           //printf("optimized mul %d\n", prev_op->imm);
+
+           op._op = OP_FAST_MUL;
+           prev_op = &op;
+          // continue;
+        }*/
+    #if 1
+        if (prev_op && prev_op->_op == OP_LDRH && (op._op == OP_STRH /*|| op._op == OP_STR*/) && prev_op->rd == op.rs1 && op.extra_flags & EXTFL_DIRECTMEMACCESS && prev_op->extra_flags & EXTFL_DIRECTMEMACCESS){
+            
+            
+            if (prev_op->preOpType == PRE_OP_IMM && op.preOpType == PRE_OP_IMM){
+                prev_op->_op = OP_NOP;
+                op._op = OP_MEMCPY;
+                op.preOpType = op._op == OP_STR ? OP_32BIT : OP_16BIT;
+                op.rs2 = prev_op->rs1;
+                //printf("prev_op->imm: %d, op.imm: %d\n", prev_op->imm, op.imm);
+                op.imm = prev_op->imm | (op.imm << 16);
+                /*printf("prev_op->imm: %d, op.imm: %d\n", op.imm&0xFFFF, op.imm>>16);
+                printf("______________\n");*/
+
+            }
+
+        }
 
         //severe speed gain with that !
-        if ( prev_op && (prev_op->_op == OP_MOV || prev_op->_op == OP_MVN || prev_op->_op == OP_MOV_S || prev_op->_op == OP_MVN_S) && 
-             (op._op >= OP_AND && op._op <= OP_SUB || (op._op >= OP_MOV && op._op <= OP_LDRH)) && 
-             prev_op->rd == op.rs2 && prev_op->preOpType < PRE_OP_REG_OFF && prev_op->condition == op.condition) {
+        if ( prev_op && (prev_op->_op == OP_MOV || prev_op->_op == OP_MVN || prev_op->_op == OP_MOV_S || prev_op->_op == OP_MEMCPY) && 
+             (op._op >= OP_AND && op._op <= OP_SUB || (op._op >= OP_MOV && op._op <= OP_STRH)) && 
+             prev_op->rd == op.rs2 && (prev_op->preOpType == PRE_OP_LSL_IMM || prev_op->preOpType == PRE_OP_ASR_IMM) && prev_op->condition == op.condition) {
 
             if (op.rd == prev_op->rd) prev_op->rd = -1;
             op.rs2 = -1;
         }
+        #endif
 
         prev_op = &op;
-    }
+    } 
+
+    /*if (noReadWriteOP && branch_addr == start_addr){
+        for(opcode& op : opcodes){
+            if (op._op == OP_SWI){
+                idleLoop = true;
+                printf("idle loop detected\n");
+                break;
+            }
+        }
+    }*/
 
 }
 
@@ -352,6 +421,16 @@ void block::optimize_basicblockThumb(){
         prev_ITP = 0;
         prev_op = &op;
     }
+
+    /*if (noReadWriteOP && branch_addr == start_addr){
+        for(opcode& op : opcodes){
+            if (op._op == OP_SWI){
+
+                idleLoop = true;
+                break;
+            }
+        }
+    } */
 }
 
 extern "C" void set_sub_flags();
@@ -359,6 +438,52 @@ extern "C" void set_and_flags();
 extern "C" void set_op_logic_flags();
 
 #define cpu (&ARMPROC)
+
+void lastBeforeCrash(int a0, int a1){
+    printf("0x%x\n", a1);
+}
+
+u32 memRead(u32 addr){
+    if((addr&(~0x3FFF)) == MMU.DTCMRegion) printf("DTCM read 0x%x, coglione\n", addr);
+    return T1ReadLong_guaranteedAligned( MMU.MAIN_MEM, addr & _MMU_MAIN_MEM_MASK32);
+}
+
+void EmitReadFunction(u32 addr){
+	unsigned 	o_ra;
+	extern u8 *CodeCache;
+
+	//Execute the patch at the end (overwrite ra addr inside the sp)
+	asm volatile("addiu $2, $31, -8"); 
+	asm volatile("sw $2, 0x14($29)");
+
+	//Get the current ra 
+	asm volatile("sw $31, %0":"=m"(o_ra));
+
+	u32 _ptr = emit_Set((o_ra - 8) - (u32)&CodeCache);
+
+    //printf("EmitReadFunction: 0x%x\n", o_ra);
+
+	if((addr&(~0x3FFF)) == MMU.DTCMRegion){
+        u32 dtcm_addr_arr = emit_lua(psp_t1, (u32)MMU.ARM9_DTCM);
+        emit_andi(psp_t0, psp_a0, 0x3FFF);
+        emit_addu(psp_t0, psp_t1, psp_t0);
+        emit_lw(psp_v0, psp_t0, dtcm_addr_arr);
+    }
+    else{
+        mem_off = emit_lua(psp_t1, (u32)MMU.MAIN_MEM);
+        emit_ext(psp_t0, psp_a0, 21, 2);
+        emit_sll(psp_t0, psp_t0, 2);
+        emit_addu(psp_t0, psp_t1, psp_t0);
+        emit_lw(psp_v0, psp_t0, mem_off);
+    }
+
+	emit_Set(_ptr);
+
+	//make_address_range_executable(o_ra - 8, o_ra - 4);
+	u32 addr_start = o_ra - 8;
+	__builtin_allegrex_cache(0x1a, addr_start);
+	__builtin_allegrex_cache(0x08, addr_start);
+}
 
 template<int PROCNUM>
 static u16 FASTCALL _LDRH(u32 adr)
@@ -374,21 +499,22 @@ static void FASTCALL _STRH(u32 regs, u32 imm)
 	WRITE16(cpu->mem_if->data, adr, data);
 }
 
-int intr_instr = 0;
 
 bool flag_loaded = false;
 bool use_flags = false;
 bool islast_op = false;
 
 void load_flags(){
-    if (use_flags && !flag_loaded){
+    if (use_flags && !flag_loaded)
+    {
         emit_lbu(psp_gp, RCPU, _flags+3);
         flag_loaded = true;
     }
 }
 
 void store_flags(){
-    if (use_flags && flag_loaded){
+    if (use_flags && flag_loaded)
+    {
         emit_sb(psp_gp, RCPU, _flags+3);
         flag_loaded = false;
     }
@@ -397,10 +523,31 @@ void store_flags(){
 template<int PROCNUM>
 void emitARMOP(opcode& op){
     switch(op._op){
+
+        case OP_FAST_MUL:
+        {
+
+            //WARNING THIS OP WORKS ONLY IF THE PREV OP IS A MOVE OP WITH THE PSP REG A1 AS TEMP REG
+            loadReg(psp_a0, op.rs1);
+            // round to nearest 2 pow
+            u32 near2 = 1;
+            u32 bit = 0;
+            while (near2 <= op.imm) {
+                near2 <<= 1;
+                ++bit;
+            }
+            bit--; near2 >>= 1;
+
+            printf("near2: %d %d\n", near2, op.imm);
+
+            u32 shift = op.imm - near2;
+            break;
+        }
+
         case OP_ITP:
         {
-            if (!(op.extra_flags & EXTFL_SKIPSAVEFLAG)) 
-                store_flags();
+            ///if (!(op.extra_flags & EXTFL_SKIPSAVEFLAG)) 
+            store_flags();
 
             emit_li(psp_a0, op.rs1); 
 
@@ -409,8 +556,12 @@ void emitARMOP(opcode& op){
             emit_jal(arm_instructions_set[INSTRUCTION_INDEX(op.rs1)]);
             emit_Write32(optmizeDelaySlot);
 
-            if (!(op.extra_flags & EXTFL_SKIPLOADFLAG) && !islast_op)
-                load_flags();
+            load_flags();
+
+            //emit_addu(psp_k1, psp_k1, psp_v0);
+
+            /*if (!(op.extra_flags & EXTFL_SKIPLOADFLAG) && !islast_op)
+                load_flags();*/
 
             intr_instr++;
         }
@@ -478,23 +629,25 @@ void emitARMOP(opcode& op){
 
         case OP_STMIA:
         {
-            printf("ADDR: 0x%x\n", emit_getCurrAdr());
-                    
-            u32 off = emit_lua(psp_t1, (u32)MMU.MAIN_MEM);
+            //printf("ADDR: 0x%x\n", emit_getCurrAdr());
 
             loadReg(psp_a0, op.rs2);                    // load dst stack addr
-            emit_ext(psp_a0, psp_a0, 21, 2);
-            emit_sll(psp_a0, psp_a0, 1);
 
-            emit_addu(psp_a0, psp_t1, psp_a0);          // k0 = mem ptr + dst stack addr
-
-            for(int j = 0; j<16; j++)
+            for(int j = 0, n = 4; j<16; j++)
                 if(BIT_N(op.rs1, j))
                 {
+
+                    emit_jal(_MMU_write32<PROCNUM>); 
                     loadReg(psp_a1, j);                 // load reg val
-                    emit_sw(psp_a1, psp_a0, off);       // store a1 to 0(t0)
-                    emit_addiu(psp_a0,psp_a0,4);        // add 4 to mem addr
+
+                    loadReg(psp_a0, op.rs2);             // load dst stack addr
+                    emit_addiu(psp_a0,psp_a0, n);        // add 4 to mem addr
+                    n+= 4;
                 }
+
+
+                //remove the last 2 useless instructions
+                emit_Skip(-8);
         }
         break;
 
@@ -519,6 +672,24 @@ void emitARMOP(opcode& op){
             storeReg(psp_v0, op.rd);
         break; 
 
+        case OP_MLA:
+            //printf("ADDR: 0x%x\n", emit_getCurrAdr());
+
+            loadReg(psp_a0, op.rs1);
+            loadReg(psp_a1, op.rs2);
+            loadReg(psp_a2, op.imm);
+
+            emit_mult(psp_a0, psp_a1);
+            emit_mflo(psp_v0);
+            emit_addu(psp_v0, psp_v0, psp_a2);
+
+            /*emit_mtlo(psp_a2);
+            emit_maddu(psp_a0, psp_a1);
+            emit_mflo(psp_v0);*/
+
+            storeReg(psp_v0, op.rd);
+        break; 
+
         case OP_CLZ:
             loadReg(psp_a0, op.rs1);
             emit_clz(psp_v0, psp_a0);
@@ -534,7 +705,6 @@ void emitARMOP(opcode& op){
         case OP_STRH:
         case OP_STR:
         {
-           currentBlock.noReadWriteOP = false;
            
            loadReg(psp_a0, op.rd);
            loadReg(psp_a1, op.rs1);
@@ -543,10 +713,7 @@ void emitARMOP(opcode& op){
 
                 if (op.preOpType == PRE_OP_IMM)   emit_addiu(psp_a0, psp_a0, op.imm);
                 else {
-                    if (op.preOpType == PRE_OP_REG_OFF){
-                        loadReg(psp_a3, op.rs2);
-                        emit_addu(psp_a0, psp_a0, psp_a3);
-                    }else if (op.preOpType == PRE_OP_PRE_P)   {
+                    if (op.preOpType == PRE_OP_PRE_P)   {
                         emit_addiu(psp_a0, psp_a0, op.imm);
                         storeReg(psp_a0, op.rd);
                     }
@@ -565,27 +732,80 @@ void emitARMOP(opcode& op){
                         storeReg(psp_t0, op.rd);
                     }
                 }
+           }else{
+
+                if (op.preOpType == PRE_OP_REG_OFF){
+                    loadReg(psp_a3, op.rs2);
+                    if (op.rs2 == -1) emit_addu(psp_a0, psp_a0, psp_a1);
+                    else              emit_addu(psp_a0, psp_a0, psp_a3);
+                }
+                else if (op.preOpType == PRE_OP_M_REG_OFF){
+                    loadReg(psp_a3, op.rs2);
+                    if (op.rs2 == -1) emit_subu(psp_a0, psp_a0, psp_a1);
+                    else              emit_subu(psp_a0, psp_a0, psp_a3);
+                }
            }
 
             if (op._op == OP_STR) {
                 /*if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
-                        emit_ext(psp_t0, psp_a0, 21, 2);
-                        emit_sll(psp_t0, psp_t0, 1);
-                        u32 off = emit_lua(psp_t1, (u32)MMU.MAIN_MEM);
-                        emit_addu(psp_t0, psp_t1, psp_t0);
-                        emit_sw(psp_a1, psp_t0, off);
+                        //printf("STR ADDR: 0x%x\n", emit_getCurrAdr());
+                        u32 dtcm_addr = emit_lua(psp_t3, (u32)&MMU.DTCMRegion);
+                        emit_lw(psp_t1, psp_t3, dtcm_addr);
+
+                        emit_andi(psp_t2, psp_a0, 0x3FFF);
+                        emit_xor(psp_t0, psp_a0, psp_t2);
+                        emit_bnel(psp_t0, psp_t1, (emit_getCurrAdr() + 4 * 5));
+                        emit_ext(psp_t0, psp_a0, 21, 2);;
+
+                        {
+                            emit_addu(psp_t0, psp_t3, psp_t2);
+                            emit_j((emit_getCurrAdr() + 4 * 10));
+                            emit_sw(psp_a1, psp_t0, dtcm_addr - offsetBetween(MMU.DTCMRegion, MMU.ARM9_DTCM));
+                        }
+                        //else
+                        {
+                            emit_sll(psp_t0, psp_t0, 2);
+                            emit_addu(psp_t1, psp_t3, psp_t0);
+                            emit_sw(psp_a1, psp_t1, (dtcm_addr + offsetBetween2(MMU.DTCMRegion, MMU.MAIN_MEM)))
+                            //invalidate jit cache
+                            u32 jit_bank = emit_lua(psp_t1, (u32)JIT.MAIN_MEM);
+                            emit_srl(psp_t0, psp_t0, 1);
+                            emit_addu(psp_t1, psp_t1, psp_t0);
+                            emit_sw(psp_zero, psp_t1, jit_bank);
+                        }
                 }else*/{
                     emit_jal(_MMU_write32<PROCNUM>); 
                     emit_ins(psp_a0, psp_zero, 1, 0);
                 }
             }else if (op._op == OP_STRH) {
-                /*if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
+                if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
+                        //printf("ADDR: 0x%x\n", emit_getCurrAdr());
+                        u32 dtcm_addr = emit_lua(psp_t3, (u32)&MMU.DTCMRegion);
+                        emit_lw(psp_t1, psp_t3, dtcm_addr);
+
+                        emit_move(psp_t0, psp_a0);
+                        emit_ins(psp_t0, psp_zero, 13, 0);
+                        emit_bnel(psp_t0, psp_t1, (emit_getCurrAdr() + 4 * 6));
                         emit_ext(psp_t0, psp_a0, 21, 1);
-                        emit_sll(psp_t0, psp_t0, 1);
-                        u32 off = emit_lua(psp_t1, (u32)MMU.MAIN_MEM);
-                        emit_addu(psp_t0, psp_t1, psp_t0);
-                        emit_sh(psp_a1, psp_t0, off);
-                }else*/{
+                        {
+                            emit_andi(psp_t0, psp_a0, 0x3FFE);
+                            emit_addu(psp_t0, psp_t3, psp_t0);
+                            emit_j((emit_getCurrAdr() + 4 * 9));
+                            emit_sh(psp_a1, psp_t0, dtcm_addr - offsetBetween(MMU.DTCMRegion, MMU.ARM9_DTCM));
+                        }
+                        //else
+                        {
+                            emit_sll(psp_t1, psp_t0, 1);
+                            emit_addu(psp_t1, psp_t3, psp_t1);
+                            emit_sh(psp_a1, psp_t1, (dtcm_addr + offsetBetween2(MMU.DTCMRegion, MMU.MAIN_MEM)));
+
+                            //invalidate jit cache
+                            u32 jit_bank = emit_lua(psp_t1, (u32)JIT.MAIN_MEM);
+                            emit_sll(psp_t0, psp_t0, 2);
+                            emit_addu(psp_t1, psp_t1, psp_t0);
+                            emit_sw(psp_zero, psp_t1, jit_bank);
+                        }
+                }else{
                     emit_jal(_MMU_write16<PROCNUM>); 
                     emit_ins(psp_a0, psp_zero, 0, 0);
                 }
@@ -603,10 +823,7 @@ void emitARMOP(opcode& op){
 
                 if (op.preOpType == PRE_OP_IMM)   emit_addiu(psp_a0, psp_a0, op.imm);
                 else {
-                    if (op.preOpType == PRE_OP_REG_OFF){
-                        loadReg(psp_a3, op.rs2);
-                        emit_addu(psp_a0, psp_a0, psp_a3);
-                    }else if (op.preOpType == PRE_OP_PRE_P)   {
+                    if (op.preOpType == PRE_OP_PRE_P)   {
                         emit_addiu(psp_a0, psp_a0, op.imm);
                         storeReg(psp_a0, op.rs1);
                     }
@@ -625,28 +842,74 @@ void emitARMOP(opcode& op){
                         storeReg(psp_t0, op.rs1);
                     }
                 }
-           }
+           }else{
 
+                if (op.preOpType == PRE_OP_REG_OFF){
+                    loadReg(psp_a3, op.rs2);
+                    if (op.rs2 == -1) emit_addu(psp_a0, psp_a0, psp_a1);
+                    else              emit_addu(psp_a0, psp_a0, psp_a3);
+                }
+                else if (op.preOpType == PRE_OP_M_REG_OFF){
+                    loadReg(psp_a3, op.rs2);
+                    if (op.rs2 == -1) emit_subu(psp_a0, psp_a0, psp_a1);
+                    else              emit_subu(psp_a0, psp_a0, psp_a3);
+                }
+           }
+        
+            
             if (op._op == OP_LDR) {
 
-                /*if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
-                        emit_ext(psp_t0, psp_a0, 21, 2);
+                if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
+                    //printf("ADDR: 0x%x\n", emit_getCurrAdr());
+
+                    u32 dtcm_addr = emit_lua(psp_t3, (u32)&MMU.DTCMRegion);
+
+                    emit_lw(psp_t1, psp_t3, dtcm_addr);
+
+                    emit_andi(psp_t2, psp_a0, 0x3FFF);
+                    emit_xor(psp_t0, psp_a0, psp_t2);
+                    emit_bnel(psp_t0, psp_t1, (emit_getCurrAdr() + 4 * 5));
+                    emit_ext(psp_t0, psp_a0, 21, 2);
+                    {
+                        emit_addu(psp_t0, psp_t3, psp_t2);
+                        emit_j((emit_getCurrAdr() + 4 * 5));
+                        emit_lw(psp_v0, psp_t0, dtcm_addr - offsetBetween(MMU.DTCMRegion, MMU.ARM9_DTCM));
+                    }
+                    //else
+                    {
                         emit_sll(psp_t0, psp_t0, 2);
-                        u32 off = emit_lua(psp_t1, (u32)MMU.MAIN_MEM);
-                        emit_addu(psp_t0, psp_t1, psp_t0);
-                        emit_lw(psp_v0, psp_t0, off);
-                }else*/{
+                        emit_addu(psp_t0, psp_t3, psp_t0);
+                        emit_lw(psp_v0, psp_t0, (dtcm_addr + offsetBetween2(MMU.DTCMRegion, MMU.MAIN_MEM)));
+                    }
+
+
+                }else{
                     emit_jal(_MMU_read32<PROCNUM>);
                     emit_ins(psp_a0, psp_zero, 1, 0);
                 }
             }else if (op._op == OP_LDRH) {
-                /*if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
+                if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
+
+                    u32 dtcm_addr = emit_lua(psp_t3, (u32)&MMU.DTCMRegion);
+                    emit_lw(psp_t1, psp_t3, dtcm_addr);
+
+                    emit_move(psp_t0, psp_a0);
+                    emit_ins(psp_t0, psp_zero, 13, 0);
+                    emit_bnel(psp_t0, psp_t1, (emit_getCurrAdr() + 4 * 6));
                     emit_ext(psp_t0, psp_a0, 21, 1);
-                    emit_sll(psp_t0, psp_t0, 1);
-                    u32 off = emit_lua(psp_t1, (u32)MMU.MAIN_MEM);
-                    emit_addu(psp_t0, psp_t1, psp_t0);
-                    emit_lhu(psp_v0, psp_t0, off);
-                }else*/
+                    {
+                        emit_andi(psp_t0, psp_a0, 0x3FFE);
+                        emit_addu(psp_t0, psp_t3, psp_t0);
+                        emit_j((emit_getCurrAdr() + 4 * 5));
+                        emit_lhu(psp_v0, psp_t0, dtcm_addr - offsetBetween(MMU.DTCMRegion, MMU.ARM9_DTCM));
+                    }
+                    //else
+                    {
+                        emit_sll(psp_t0, psp_t0, 1);
+                        emit_addu(psp_t0, psp_t3, psp_t0);
+                        emit_lhu(psp_v0, psp_t0, (dtcm_addr + offsetBetween2(MMU.DTCMRegion, MMU.MAIN_MEM)));
+                    }
+                }else
                 {
                     emit_jal(_MMU_read16<PROCNUM>);
                     emit_ins(psp_a0, psp_zero, 0, 0);
@@ -660,12 +923,14 @@ void emitARMOP(opcode& op){
         case OP_SUB_S:
         case OP_CMP:
         {
-
             if (op.preOpType == PRE_OP_IMM){
                 arm_sub<true, false>(op);
-                emit_li(psp_a1, op.imm);
+                if (is_u16(op.imm))
+                    emit_li(psp_a1, op.imm);
             }else
                 arm_sub<false, false>(op);
+
+            //printf("0x%x\n", emit_getCurrAdr());
 
             uint32_t optmizeDelaySlot = emit_SlideDelay();
             emit_jal(set_sub_flags);
@@ -733,6 +998,72 @@ void emitARMOP(opcode& op){
                 emit_jal(set_op_logic_flags);
                 emit_move(psp_v0, psp_a1);     
             }
+        break;
+
+        case OP_MEMCPY:
+        {
+
+            u32 ldr_imm = op.imm & 0xFFFF;
+            u32 str_imm = (op.imm >> 16) & 0xFFFF;
+
+            //printf("rd: %d, rs1: %d, rs2: %d, imm: %d\n", op.rd, op.rs1, op.rs2, op.imm);
+            //printf("ADDR: 0x%x\n", emit_getCurrAdr());
+
+            loadReg(psp_a0, op.rs2);
+            if (ldr_imm != 0) 
+                emit_addiu(psp_a0, psp_a0, ldr_imm);
+
+            
+            emit_jal(_MMU_read16<PROCNUM>);
+            emit_ins(psp_a0, psp_zero, 0, 0);
+
+            emit_move(psp_a1, psp_v0);
+            
+            storeReg(psp_v0, op.rs1);
+            loadReg(psp_a0, op.rd);
+
+            if (str_imm != 0) 
+                emit_addiu(psp_a0, psp_a0, str_imm);
+
+            if (op.preOpType == OP_16BIT){
+                emit_jal(_MMU_write16<PROCNUM>); 
+                emit_ins(psp_a0, psp_zero, 0, 0);
+            }else if (op.preOpType == OP_32BIT) {
+                emit_jal(_MMU_write32<PROCNUM>); 
+                emit_ins(psp_a0, psp_zero, 1, 0);
+            }
+
+        }
+        break;
+
+        case OP_BXC:
+        {
+            //printf("0x%x\n", emit_getCurrAdr());
+
+            // u32 tmp = cpu->R[REG_POS(i, 0)];
+            //loadReg(psp_a0, op.rs1);
+
+            // BIT0(tmp);
+            //emit_ext(psp_t0, psp_a0, 0, 1);
+
+            // cpu->CPSR.bits.T = BIT0(tmp);
+            /*emit_lb(psp_t1, RCPU, _flags+1);
+            emit_ins(psp_t0, psp_t1, 5, 6);
+            emit_sb(psp_t0, RCPU, _flags+1);*/
+
+            emit_li(psp_a0, op.imm);
+            emit_addu(psp_fp, psp_fp, psp_a0);
+            
+            // cpu->R[15] = tmp & (0xFFFFFFFC|(cpu->CPSR.bits.T<<1));
+            /*emit_ext(psp_fp, psp_a0, 1, 31);
+            emit_sll(psp_fp, psp_fp, 1);*/
+            emit_ins(psp_fp, psp_zero, 1, 0);
+            //emit_srlv(psp_fp, psp_fp, psp_t0);
+
+            emit_sw(psp_fp, psp_k0, _R15);
+            emit_sw(psp_fp, psp_k0, _next_instr);
+            emit_sw(psp_fp, psp_k0, _instr_adr);
+        }
         break;
     }
 }
@@ -807,8 +1138,10 @@ void emitThumbOP(opcode& op){
 
             if (dst == psp_v0)  storeReg(psp_v0, op.rd);
 
+            storeReg(dst, op.rd);
             emit_jal(set_sub_flags);
-            if (dst == psp_v0)  storeReg(psp_v0, op.rd); else emit_move(psp_v0, dst); 
+            if (dst != psp_v0)  emit_move(psp_v0, dst); 
+            else emit_nop(); 
         }
         break;
 
@@ -818,15 +1151,17 @@ void emitThumbOP(opcode& op){
             psp_gpr_t dst = (op.rs1 == op.rd) ? rs1 : reg_alloc.getReg(op.rd, psp_v0, false); 
             
             if (op.preOpType == PRE_OP_IMM){
-                if (dst != rs1 || op.imm != 0) emit_addiu(dst, rs1, op.imm);
+                emit_addiu(dst, rs1, op.imm);
             }else{
                 psp_gpr_t rs2 = reg_alloc.getReg(op.rs2, psp_a1);
                 emit_addu(dst, rs1, rs2);
             }
           
             if (!op.extra_flags&EXTFL_NOFLAGS){
+                storeReg(dst, op.rd);
                 emit_jal(set_and_flags);
-                if (dst == psp_v0)  storeReg(psp_v0, op.rd); else emit_move(psp_v0, dst);  
+                if (dst != psp_v0)  emit_move(psp_v0, dst); 
+                else emit_nop(); 
             } 
             else if (dst == psp_v0)  storeReg(psp_v0, op.rd);
         }
@@ -870,18 +1205,16 @@ void emitThumbOP(opcode& op){
 
         case OP_SWI:
         {
-            //uint32_t optmizeDelaySlot = emit_SlideDelay();
-
-            //reg_alloc.dealloc_all();
             reg_alloc.dealloc(0);
             reg_alloc.dealloc(1);
             reg_alloc.dealloc(2);
             reg_alloc.dealloc(3);
             reg_alloc.dealloc(15);
 
+            uint32_t optmizeDelaySlot = emit_SlideDelay();
+
             emit_jal(cpu->swi_tab[op.rs1]);
-            emit_nop();
-            //emit_Write32(optmizeDelaySlot);
+            emit_Write32(optmizeDelaySlot);
         }
 
         case OP_CMP:
@@ -935,10 +1268,11 @@ void emitThumbOP(opcode& op){
 
                 if (dst != psp_v0) emit_move(dst, rs1);
 
-                if (dst == 15) emit_sw(dst, psp_k0, _next_instr);
-
-                emit_jal(set_op_logic_flags);
-                if (dst == psp_v0)  storeReg(rs1, op.rd); else emit_move(psp_v0, dst); 
+                if (op.rd == 15) emit_sw(dst, psp_k0, _next_instr);
+                else{
+                    emit_jal(set_op_logic_flags);
+                    if (dst == psp_v0)  storeReg(rs1, op.rd); else emit_move(psp_v0, dst); 
+                }
             }
         }
         break;
@@ -962,8 +1296,31 @@ void emitThumbOP(opcode& op){
                 emit_jal(_MMU_read32<PROCNUM>);
                 emit_ins(psp_a0, psp_zero, 1, 0);
             }else{
-                emit_jal(_MMU_read16<PROCNUM>);
-                emit_ins(psp_a0, psp_zero, 0, 0);
+                if (op.extra_flags & EXTFL_DIRECTMEMACCESS){
+
+                    u32 dtcm_addr = emit_lua(psp_t3, (u32)&MMU.DTCMRegion);
+                    emit_lw(psp_t1, psp_t3, dtcm_addr);
+
+                    emit_move(psp_t0, psp_a0);
+                    emit_ins(psp_t0, psp_zero, 13, 0);
+                    emit_bnel(psp_t0, psp_t1, (emit_getCurrAdr() + 4 * 6));
+                    emit_ins(psp_a0, psp_zero, 0, 0);
+                    {
+                        emit_andi(psp_t0, psp_a0, 0x3FFE);
+                        emit_addu(psp_t0, psp_t3, psp_t0);
+                        emit_j((emit_getCurrAdr() + 4 * 4));
+                        emit_lhu(dst, psp_t0, dtcm_addr - offsetBetween(MMU.DTCMRegion, MMU.ARM9_DTCM));
+                    }
+                    //else
+                    {
+                        emit_addu(psp_t0, psp_t3, psp_t0);
+                        emit_lhu(dst, psp_t0, (dtcm_addr + offsetBetween2(MMU.DTCMRegion, MMU.MAIN_MEM)));
+                    }
+                }else
+                {
+                    emit_jal(_MMU_read16<PROCNUM>);
+                    emit_ins(psp_a0, psp_zero, 0, 0);
+                }
             }
 
             if (dst == psp_v0)  storeReg(psp_v0, op.rd); else emit_move(dst, psp_v0);
@@ -973,7 +1330,6 @@ void emitThumbOP(opcode& op){
         case OP_STR:
         case OP_STRH:
         {
-           currentBlock.noReadWriteOP = false;
 
            //printf("0x%x\n", emit_getCurrAdr());
 
@@ -989,23 +1345,42 @@ void emitThumbOP(opcode& op){
             else if ((rs1 != psp_a0 || op.imm != 0))
                 emit_addiu(psp_a0, rs1, op.imm);
 
-           if (op.extra_flags & EXTFL_DIRECTMEMACCESS && op._op != OP_STR){
-
-                u32 off = emit_lua(psp_t1, (u32)MMU.MAIN_MEM);
+           /*if (op.extra_flags & EXTFL_DIRECTMEMACCESS && op._op != OP_STR){
 
                 if (op._op == OP_STR){
-                    emit_ext(psp_t0, psp_a0, 21, 2);
+                    /*emit_ext(psp_t0, psp_a0, 21, 2);
                     emit_sll(psp_t0, psp_t0, 2);
                     emit_addu(psp_t0, psp_t1, psp_t0);
                     emit_sw(rs2, psp_t0, off);
                 }else {
+                    u32 dtcm_addr = emit_lua(psp_t3, (u32)&MMU.DTCMRegion);
+                    emit_lw(psp_t1, psp_t3, dtcm_addr);
+
+                    emit_move(psp_t0, psp_a0);
+                    emit_ins(psp_t0, psp_zero, 13, 0);
+                    emit_bnel(psp_t0, psp_t1, (emit_getCurrAdr() + 4 * 6));
                     emit_ext(psp_t0, psp_a0, 21, 1);
-                    emit_sll(psp_t0, psp_t0, 1);
-                    emit_addu(psp_t0, psp_t1, psp_t0);
-                    emit_sh(rs2, psp_t0, off);
+                    {
+                        emit_andi(psp_t0, psp_a0, 0x3FFE);
+                        emit_addu(psp_t0, psp_t3, psp_t0);
+                        emit_j((emit_getCurrAdr() + 4 * 9));
+                        emit_sh(rs1, psp_t0, dtcm_addr - offsetBetween(MMU.DTCMRegion, MMU.ARM9_DTCM));
+                    }
+                    //else
+                    {
+                        emit_sll(psp_t1, psp_t0, 1);
+                        emit_addu(psp_t1, psp_t3, psp_t1);
+                        emit_sh(rs1, psp_t1, (dtcm_addr + offsetBetween2(MMU.DTCMRegion, MMU.MAIN_MEM)));
+
+                        //invalidate jit cache
+                        u32 jit_bank = emit_lua(psp_t1, (u32)JIT.MAIN_MEM);
+                        emit_sll(psp_t0, psp_t0, 2);
+                        emit_addu(psp_t1, psp_t1, psp_t0);
+                        emit_sw(psp_zero, psp_t1, jit_bank);
+                    }
                 }
 
-           }else {
+           }else */{
 
                 if (rs2 != psp_a1) emit_move(psp_a1, rs2);
 
@@ -1034,6 +1409,7 @@ void emitThumbOP(opcode& op){
         break;
 
 
+
         default:
             printf("Unknown Thumb OP: %d\n", op._op);
             exit(1);
@@ -1054,20 +1430,14 @@ std::function<bool(bool)> arm_compiledOP[] = {
         emit_addu(psp_a0, psp_a0, psp_a1);
         emit_sw(psp_a0, psp_k0, 0x10);
 
-        if (PROCNUM)
-            currentBlock.emitArmBranch<1>();
-        else
-            currentBlock.emitArmBranch<0>();
+        currentBlock.emitArmBranch<0>();
 
         return true;
     }, 
     [] (bool PROCNUM) -> bool { 
 
 
-        if (PROCNUM)
-            emit_jal(_LDRH<1>);
-        else
-            emit_jal(_LDRH<0>);
+        emit_jal(_LDRH<0>);
 
         emit_lw(psp_a0, psp_k0, 0x38);
 
@@ -1086,10 +1456,7 @@ std::function<bool(bool)> arm_compiledOP[] = {
         {
             emit_sw(psp_v0, psp_k0, 0x10);  //emit_nop();
 
-            if (PROCNUM)
-                emit_jal(_LDRH<1>);
-            else
-                emit_jal(_LDRH<0>);
+            emit_jal(_LDRH<0>);
 
             emit_lw(psp_a0, psp_k0, 0x38);
 
@@ -1099,10 +1466,7 @@ std::function<bool(bool)> arm_compiledOP[] = {
 
             emit_movi(psp_a0, 0xa00);
             
-            if (PROCNUM)
-                emit_jal(_STRH<1>);
-            else
-                emit_jal(_STRH<0>);
+           emit_jal(_STRH<0>);
 
             emit_move(psp_a1, psp_zero);
 
@@ -1110,10 +1474,7 @@ std::function<bool(bool)> arm_compiledOP[] = {
             emit_sw(psp_a0, psp_k0, 0x14);
         }
 
-        if (PROCNUM)
-            currentBlock.emitArmBranch<1>();
-        else
-            currentBlock.emitArmBranch<0>();
+        currentBlock.emitArmBranch<0>();
 
         return false;
     }
@@ -1140,28 +1501,7 @@ bool block::emitThumbBlock(){
 
     reg_alloc.reset(); 
 
-    if (opcodes.size() == 1){
-        opcode op = opcodes.front();
-
-        emit_li(psp_fp, op.op_pc + 2);
-        emit_sw(psp_fp, psp_k0, _next_instr); 
-
-        emit_addiu(psp_at, psp_fp, 2);
-        emit_sw(psp_at, psp_k0, _R15);
-
-        if (op._op != OP_ITP) load_flags();
-
-        emitThumbOP<PROCNUM>(op);
-
-        if (op._op != OP_ITP) store_flags();
-
-        /*if (onlyITP) {
-            printf("%s \n",des_thumb_instructions_set[op.rs1 >>6](op.op_pc, op.rs1, dasmbuf));
-        }*/
-  
-        return false;  
-    }else
-        emit_li(psp_fp, opcodes.front().op_pc);
+    emit_li(psp_fp, opcodes.front().op_pc);
 
     opcode last_op = opcodes.back();
     const bool islastITP = last_op._op == OP_ITP;
@@ -1188,10 +1528,15 @@ bool block::emitThumbBlock(){
     reg_alloc.dealloc_all(); 
 
     //possible idle loop, do more checks here
-    return false;
+    return idleLoop;
 
 }
 
+static bool instr_is_conditional(u32 opcode)
+{
+	return !(CONDITION(opcode) == 0xE
+	         || (CONDITION(opcode) == 0xF && CODE(opcode) == 5));
+}
 
 template<int PROCNUM>
 bool block::emitArmBlock(){
@@ -1205,58 +1550,65 @@ bool block::emitArmBlock(){
 
     char * found = strstr(compiled_functions_hash, block_hash);
 
+
     if (found != NULL) {
         return arm_compiledOP[(found - compiled_functions_hash) / 51](PROCNUM);
     }
 
-   if (opcodes.size() == 1){
-        opcode op = opcodes.front();
-        
-        emit_li(psp_fp, op.op_pc + 4);
-        emit_sw(psp_fp, psp_k0, _next_instr);
-
-        emit_addiu(psp_at, psp_fp, 4);
-        emit_sw(psp_at, psp_k0, _R15);
-        
-        /*if (op.condition != -1 || op._op >= OP_CMP)*/ load_flags();
-
-        conditional(emitARMOP<PROCNUM>(op))
-
-        /*if (op.condition != -1 || op._op >= OP_CMP)*/ store_flags();
-
-        return (intr_instr == 0);
-    }else
-        emit_li(psp_fp, opcodes.front().op_pc);
+   start_block = emit_getCurrAdr();
+   emit_li(psp_fp, opcodes.front().op_pc);
     
 
     opcode last_op = opcodes.back();
     const bool islastITP = last_op._op == OP_ITP;
 
+
+    // find OP_MCR_MRC and delete it
+    for (auto it = opcodes.begin(); it != opcodes.end(); ++it){
+        if (it->_op == OP_MRC_MCR){
+            opcodes.erase(it);
+            break;
+        }
+    }
+    bool last = false; 
+    load_flags();
     for(opcode op : opcodes){ 
+        bool isConditional = op.condition == 0xF && instr_is_conditional(_MMU_read32<ARM9>(op.op_pc));
  
         //TODO: with nop and skip prefetch, the next_istr and r15 gets a wrong value
         const u8 isize = /*(op._op == OP_NOP && op.rd == 0) ? 8 :*/ 4;
 
-        if (last_op.op_pc != op.op_pc)
+        if (last_op.op_pc != op.op_pc && !isConditional)
             emit_prefetch(isize, op.rs1 == 15 || op.rs2 == 15, op._op == OP_ITP);
-        else
+        else {
+            //if (!(op._op == OP_BXC && op.condition < 14))
             //Last op has always to save 
             emit_prefetch(isize, true, true);
+            last = true;
+        }
 
-        if (op.condition != -1 || (op._op >= OP_CMP))
-            load_flags();
+        /*if (op.condition != -1 || (op._op >= OP_CMP))
+            load_flags();*/
 
 
         //if (op.extra_flags & EXTFL_MERGECOND) printf("MERGECOND at 0x%08X\n", emit_getCurrAdr());
-
-        conditional(emitARMOP<PROCNUM>(op))
+        
+        if (isConditional) { 
+            conditional(
+                if (!last)
+                    emit_prefetch(isize, op.rs1 == 15 || op.rs2 == 15, op._op == OP_ITP); 
+                emitARMOP<PROCNUM>(op)
+                )
+        }else{
+            conditional(emitARMOP<PROCNUM>(op))
+        }
 
     }
 
     store_flags();
 
     //possible idle loop, do more checks here
-    return (intr_instr == 1) && currentBlock.noReadWriteOP && (currentBlock.branch_addr == currentBlock.start_addr);
+    return idleLoop; 
 }
 
 

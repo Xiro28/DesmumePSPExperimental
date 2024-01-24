@@ -222,7 +222,7 @@ public:
 	
 
 	//static const u32 kMaxCacheSize = 6*512*1024; //2MB
-	static const u32 kMaxCacheSize = 4*1024*1024; 
+	static const u32 kMaxCacheSize = 6*1024*1024; 
 	 // static const u32 kMaxCacheSize = 16*1024*1024; 
 	
 

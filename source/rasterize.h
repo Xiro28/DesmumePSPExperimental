@@ -23,7 +23,7 @@
 
 extern  GPU3DInterface gpu3DRasterize;
 
-extern volatile  u32 _screen[GFX3D_FRAMEBUFFER_WIDTH * GFX3D_FRAMEBUFFER_HEIGHT];
+//extern volatile  u32 _screen[GFX3D_FRAMEBUFFER_WIDTH * GFX3D_FRAMEBUFFER_HEIGHT];
 
 class TexCacheItem;
 

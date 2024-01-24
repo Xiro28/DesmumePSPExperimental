@@ -30,50 +30,40 @@ void InitConfigParms(configured_features * params){
     strcpy(configparms[c].name,"Screen SWAP");
 	params->swap = configparms[c].var;
 	c++;
+
 	strcpy(configparms[c].name,"Show Touch Cursor");
 	params->cur = configparms[c].var;
 	c++;
+
 	strcpy(configparms[c].name,"Show FPS");
 	params->showfps = configparms[c].var;
 	c++;
-#ifndef LOWRAM
+
 	strcpy(configparms[c].name,"Enable Audio");
 	params->enable_sound = configparms[c].var;
 	c++;
-#endif
-	strcpy(configparms[c].name,"3D Frameskip");
+
+	strcpy(configparms[c].name,"Frameskip");
 	params->frameskip = configparms[c].var;
 	c++;
+
     strcpy(configparms[c].name,"Language");
 	params->firmware_language = configparms[c].var;
 	c++;
+
 	strcpy(configparms[c].name,"Render 3D");
 	params->Render3D = configparms[c].var;
 	c++;
+
 	strcpy(configparms[c].name, "Fast ME Rendering");
 	params->FastMERendering = configparms[c].var;
 	c++;
+
 	strcpy(configparms[c].name, "FPS Cap");
 	params->fps_cap = configparms[c].var;
 	c++;
-	/*strcpy(configparms[c].name, "Hide screen");
-	params->hide_screen = configparms[c].var;
-	c++;*/
-	
-	totalconfig = c;
-	
-	/*strcpy(configparms[c].name, "Disable 3d calculation");
-	params->Disable_3D_calc = configparms[c].var;
-	c++;
-	strcpy(configparms[c].name, "Disable ARM7");
-	params->D_ARM7 = configparms[c].var;
-	c++;*/
-	/*strcpy(configparms[c].name,"Max FPS");
-	params->fps_cap_num = configparms[c].var;
-	c++;*/
 
-	//
-	
+	totalconfig = c;
 }
 
 bool changed = false;
@@ -270,12 +260,13 @@ void DoConfig(configured_features * params)
 #else.
 	configparms[1].var = 1;
 	configparms[2].var = 1;
+	configparms[4].var = 2;
 	configparms[6].var = 1;
+	configparms[8].var = 1;
 
 	//configparms[7].var = 1;
 #endif // LOWRAM
 
-	configparms[7].var = 1;
 
 	
 
@@ -569,7 +560,7 @@ void DSEmuGui(char *path,char *out)
 						continue;
 					}*/
 
-					SetupDisp_EMU();
+					//SetupDisp_EMU();
 					sprintf(out,"%s/%s",tmp,filelist.fname[selpos].name);	
 					printf("ROM2: %s\n", out);
 					break;

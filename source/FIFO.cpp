@@ -36,6 +36,11 @@
 FIFO<u32, 16> IPCFIFO9; // FIFO in which the ARM9 writes
 FIFO<u32, 16> IPCFIFO7;
 
+#define IPCFIFO_src (proc == ARM9 ? IPCFIFO9 : IPCFIFO7)
+#define IPCFIFO_dst (proc == ARM9 ? IPCFIFO7 : IPCFIFO9)
+#define IPCFIFOCNT_src (proc == ARM9 ? IPCFIFOCnt9 : IPCFIFOCnt7)
+#define IPCFIFOCNT_dst (proc == ARM9 ? IPCFIFOCnt7 : IPCFIFOCnt9)
+
 void IPC_FIFOinit(u8 proc)
 {
 	IPCFIFO9.Clear();
@@ -44,19 +49,20 @@ void IPC_FIFOinit(u8 proc)
 
 void IPC_FIFOsend(u8 proc, u32 val)
 {
+	if (IPCFIFOCNT_src & IPCFIFOCNT_FIFOENABLE){
 
-	if (IPCFIFOCnt9 & IPCFIFOCNT_FIFOENABLE){
-
-		if (IPCFIFO9.IsFull()){
-			IPCFIFOCnt9 |= 0x4000;
+		if (IPCFIFO_src.IsFull()){
+			IPCFIFOCNT_src |= 0x4000;
 			return;
 		}else
 		{
-			bool wasempty = IPCFIFO9.IsEmpty();
-			IPCFIFO9.Write(val);
+			bool wasempty = IPCFIFO_src.IsEmpty();
+			IPCFIFO_src.Write(val);
+
 			OnIPCRequest();
-			if ((IPCFIFOCnt7 & 0x0400) && wasempty)
-				NDS_makeIrq(1, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
+			
+			if ((IPCFIFOCNT_dst & 0x0400) && wasempty)
+				NDS_makeIrq(proc^1, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
 		}
 		
 		NDS_Reschedule();
@@ -65,20 +71,20 @@ void IPC_FIFOsend(u8 proc, u32 val)
 
 u32 IPC_FIFOrecv(u8 proc)
 {
-	 if (IPCFIFOCnt9 & 0x8000)
+	 if (IPCFIFOCNT_src & 0x8000)
         {
             u32 ret;
-            if (IPCFIFO7.IsEmpty())
+            if (IPCFIFO_dst.IsEmpty())
             {
-                IPCFIFOCnt9 |= 0x4000;
+                IPCFIFOCNT_src |= 0x4000;
                 return 0;
             }
             else
             {
-                ret = IPCFIFO7.Read();
+                ret = IPCFIFO_dst.Read();
 
-                if (IPCFIFO7.IsEmpty() && (IPCFIFOCnt7 & 0x0004))
-                    NDS_makeIrq(1, IRQ_BIT_IPCFIFO_SENDEMPTY);
+                if (IPCFIFO_dst.IsEmpty() && (IPCFIFOCNT_dst & 0x0004))
+                    NDS_makeIrq(proc^1, IRQ_BIT_IPCFIFO_SENDEMPTY);
 				
 				NDS_Reschedule();
             }
@@ -92,25 +98,25 @@ u32 IPC_FIFOrecv(u8 proc)
 void IPC_FIFOcnt(u8 proc, u16 val)
 {
 	if (val & 0x0008)
-		IPCFIFO9.Clear();
-	if ((val & 0x0004) && (!(IPCFIFOCnt9 & 0x0004)) && IPCFIFO9.IsEmpty())
-		NDS_makeIrq(0, IRQ_BIT_IPCFIFO_SENDEMPTY);
-	if ((val & 0x0400) && (!(IPCFIFOCnt9 & 0x0400)) && (!IPCFIFO7.IsEmpty()))
-		NDS_makeIrq(0, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
+		IPCFIFO_src.Clear();
+	if ((val & 0x0004) && (!(IPCFIFOCNT_src & 0x0004)) && IPCFIFO_src.IsEmpty())
+		NDS_makeIrq(proc, IRQ_BIT_IPCFIFO_SENDEMPTY);
+	if ((val & 0x0400) && (!(IPCFIFOCNT_src & 0x0400)) && (!IPCFIFO_dst.IsEmpty()))
+		NDS_makeIrq(proc, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
 	if (val & 0x4000)
-		IPCFIFOCnt9 &= ~0x4000;
-	IPCFIFOCnt9 = (val & 0x8404) | (IPCFIFOCnt9 & 0x4000);
+		IPCFIFOCNT_src &= ~0x4000;
+	IPCFIFOCNT_src = (val & 0x8404) | (IPCFIFOCNT_src & 0x4000);
 
 	NDS_Reschedule();
 }
 
 u32 IPC_FIFOgetCnt(u8 proc)
 {
-	u16 val = IPCFIFOCnt9;
-	if (IPCFIFO9.IsEmpty())     val |= 0x0001;
-	else if (IPCFIFO9.IsFull()) val |= 0x0002;
-	if (IPCFIFO7.IsEmpty())     val |= 0x0100;
-	else if (IPCFIFO7.IsFull()) val |= 0x0200;
+	u16 val = IPCFIFOCNT_src;
+	if (IPCFIFO_src.IsEmpty())     val |= 0x0001;
+	else if (IPCFIFO_src.IsFull()) val |= 0x0002;
+	if (IPCFIFO_dst.IsEmpty())     val |= 0x0100;
+	else if (IPCFIFO_dst.IsFull()) val |= 0x0200;
 	return val;
 }
 
@@ -187,6 +193,8 @@ void GFX_FIFOsend(u8 cmd, u32 param)
 	//seems like it would be less work in the HW to make a counter than do cmps on all the command bytes, so maybe we're even doing it right.
 	if(IsMatrixStackCommand(cmd))
 		gxFIFO.matrix_stack_op_size++;
+
+	
 
 	/*
 	if(gxFIFO.size>=HACK_GXIFO_SIZE) {

@@ -1353,13 +1353,14 @@ template<SPUInterpolationMode INTERPOLATE_MODE>
 
 FORCEINLINE static void _SPU_ChanUpdate(const bool actuallyMix, SPU_struct* const SPU, channel_struct* const chan)
 {
-	switch(CommonSettings.spuInterpolationMode)
+	/*switch(CommonSettings.spuInterpolationMode)
 	{
 	case SPUInterpolation_None: __SPU_ChanUpdate<SPUInterpolation_None>(actuallyMix, SPU, chan); break;
 	case SPUInterpolation_Linear: __SPU_ChanUpdate<SPUInterpolation_Linear>(actuallyMix, SPU, chan); break;
 	case SPUInterpolation_Cosine: __SPU_ChanUpdate<SPUInterpolation_Cosine>(actuallyMix, SPU, chan); break;
 	default: assert(false);
-	}
+	}*/
+	__SPU_ChanUpdate<SPUInterpolation_None>(actuallyMix, SPU, chan);
 }
 
 //ENTERNEW
@@ -1578,8 +1579,8 @@ static void SPU_MixAudio(bool actuallyMix, SPU_struct *SPU, int length)
 {
 	if(actuallyMix)
 	{
-		fast_memset(SPU->sndbuf, 0, length*4*2);
-		fast_memset(SPU->outbuf, 0, length*2*2);
+		memset(SPU->sndbuf, 0, length*4*2);
+		memset(SPU->outbuf, 0, length*2*2);
 	}
 
 	//we used to use master enable here, and do nothing if audio is disabled.
@@ -1604,7 +1605,7 @@ static void SPU_MixAudio(bool actuallyMix, SPU_struct *SPU, int length)
 	**/
 		//non-advanced mode
 		//for(int i=0;i<16;i++)
-		for(int i=0;i<16/iSoundQuality;i++)
+		for(int i=0;i<16;i++)
 		{
 			channel_struct *chan = &SPU->channels[i];
 
@@ -1629,7 +1630,7 @@ static void SPU_MixAudio(bool actuallyMix, SPU_struct *SPU, int length)
 	u8 vol = SPU->regs.mastervol;
 
 	// convert from 32-bit->16-bit
-	if(actuallyMix && speakers)
+	if(actuallyMix && speakers){
 		for (int i = 0; i < length*2; i++)
 		{
 			// Apply Master Volume
@@ -1637,6 +1638,7 @@ static void SPU_MixAudio(bool actuallyMix, SPU_struct *SPU, int length)
 			s16 outsample = MinMax(SPU->sndbuf[i],-0x8000,0x7FFF);
 			SPU->outbuf[i] = outsample;
 		}
+	}
 
 
 }
@@ -1656,6 +1658,8 @@ void SPU_Emulate_core()
 	samples += samples_per_hline;
 	spu_core_samples = (int)(samples);
 	samples -= spu_core_samples;
+
+	//printf("SPU_Emulate_core: %d\n", spu_core_samples);
 	
 	// We don't need to mix audio for Dual Synch/Asynch mode since we do this
 	// later in SPU_Emulate_user(). Disable mixing here to speed up processing.

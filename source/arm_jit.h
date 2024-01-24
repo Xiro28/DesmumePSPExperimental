@@ -39,10 +39,6 @@ struct JIT_struct
 	uintptr_t ARM9_ITCM[0x8000/2];
 	uintptr_t ARM9_LCDC[0xA4000/2];
 	uintptr_t ARM9_BIOS[0x8000/2];
-	uintptr_t ARM7_BIOS[0x4000/2];
-	uintptr_t ARM7_ERAM[0x10000/2];
-	uintptr_t ARM7_WIRAM[0x10000/2];
-	uintptr_t ARM7_WRAM[0x40000/2];
 
 	static uintptr_t *JIT_MEM[0x4000];
 };

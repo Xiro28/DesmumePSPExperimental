@@ -30,6 +30,7 @@ u32  emit_SlideDelay();
 
 void make_address_range_executable(u32 address_start, u32 address_end);
 
+void initCodeCache();
 void resetCodeCache();
 
 void* emit_GetPtr();

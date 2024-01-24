@@ -79,7 +79,6 @@ $(SRCDIR)/addons/slot2_guitarGrip.o \
 $(SRCDIR)/PSP/FrontEnd.o \
 $(SRCDIR)/PSP/PSPDisplay.o \
 $(SRCDIR)/PSP/vram.o \
-$(SRCDIR)/PSP/psp_sound.o \
 $(SRCDIR)/PSP/FastMemcpyPSP.o \
 $(SRCDIR)/PSP/DisableFPUExceptions.o \
 $(SRCDIR)/sndsdl.o \
@@ -95,7 +94,7 @@ CXX=psp-g++
 PSPSDK = $(shell psp-config --pspsdk-path)
 PSPDEV = $(shell psp-config -d)
 
-CFLAGS = -O3 -DNOPRINTF -finline-functions -fno-rtti -ffast-math -fweb -g  -G0 -Wall -D PSP -D NOSSE2 -D HAVE_LIBZ -funsigned-char -Wall \
+CFLAGS = -O3 -DNOPRINTF -finline-functions -fno-rtti -ffast-math -fweb -g3  -G0 -Wall -D PSP -D NOSSE2 -D HAVE_LIBZ -funsigned-char -Wall \
                   -fstrict-aliasing -falign-functions \
                   -falign-loops -falign-labels -falign-jumps -faligned-new -D HAVE_JIT \
                   -fcall-saved-s0 -fcall-saved-s1 -fcall-saved-s2 -fcall-saved-s3 -fcall-saved-s4 
@@ -108,7 +107,7 @@ ASFLAGS = $(CFLAGS)
 INCDIR =  ./libs/include
 
 LIBDIR = ./libs/lib
-LIBS  =   -lME -ldynarec -lintrafont -lpspdmac -lpspaudiocodec -lpspmath -lpsppower -lglut -lpspgum  -lfreetype -lpng -lz  -lm -lpspgu -lpsphprm -lpspaudio -lstdc++ -lpspvfpu -lpsprtc
+LIBS  =   -lME -ldynarec -lintrafont -lpspdmac -lpspaudiolib -lpspaudio -lpspmath -lpsppower -lglut -lpspgum  -lfreetype -lpng -lz  -lm -lpspgu -lpsphprm -lpspaudio -lstdc++ -lpspvfpu -lpsprtc
 LIBS += -lpspaudiolib -lpspvram  -lpspsdk -lpng -lm 
 
 EXTRA_TARGETS = EBOOT.PBP

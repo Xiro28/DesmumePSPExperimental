@@ -256,7 +256,7 @@ using std::min;
 
 GFX3D gfx3d;
 //Viewer3d_State* viewer3d_state = NULL;
-static GFX3D_Clipper boxtestClipper;
+//static GFX3D_Clipper boxtestClipper;
 
 //tables that are provided to anyone
 CACHE_ALIGN u32 color_15bit_to_24bit_reverse[32768];
@@ -2317,13 +2317,15 @@ void gfx3d_execute3D()
 	//this is a SPEED HACK
 	//fifo is currently emulated more accurately than it probably needs to be.
 	//without this batch size the emuloop will escape way too often to run fast.
-	u8 cost = 0;
+	//u8 cost = 0;
 
 	for(u8 i=HACK_FIFO_BATCH_SIZE;--i;) 
 	{
 		if(likely(GFX_PIPErecv(&cmd, &param)))
 		{
 			//if (isSwapBuffers) printf("Executing while swapbuffers is pending: %d:%08X\n",cmd,param);
+
+			GFX_DELAY(1);
 
 			//since we did anything at all, incur a pipeline motion cost.
 			//also, we can't let gxfifo sequencer stall until the fifo is empty.
@@ -2335,7 +2337,7 @@ void gfx3d_execute3D()
 		//	if(HasTo_ogfx3d_execute(cmd,param))
 			gfx3d_execute(cmd, param);
 
-			cost++;
+			//cost++;
 			//this is a COMPATIBILITY HACK.
 			//this causes 3d to take virtually no time whatsoever to execute.
 			//this was done for marvel nemesis, but a similar family of 
@@ -2343,11 +2345,11 @@ void gfx3d_execute3D()
 			//the true answer is probably dma bus blocking.. but lets go ahead and try this and
 			//check the compatibility, at the very least it will be nice to know if any games suffer from
 			//3d running too fast
-			MMU.gfx3dCycles = nds_timer + 2;
+			MMU.gfx3dCycles = nds_timer + 1;
 		} else break;
 	}
 	
-	if (cost) V_GFX_DELAY(cost); 
+	//if (cost) V_GFX_DELAY(cost); 
 }
 
 void gfx3d_glFlush(u32 v)
@@ -2580,7 +2582,7 @@ void gfx3d_VBlankEndSignal(bool skipFrame)
 
 	drawPending = FALSE;
 	
- 	gpu3D->NDS_3D_Render();
+ 	//gpu3D->NDS_3D_Render();
 }
 
 //#define _3D_LOG
@@ -2705,7 +2707,7 @@ void gfx3d_GetLineData(int line, u8** dst)
 	//gpu3D->NDS_3D_RenderFinish();
 
 	//comment this if using GU 3D
-	*dst = (u8*)(_screen + _3DLineAddr[line]);
+	//*dst = (u8*)(_screen + _3DLineAddr[line]);
 }
 
 void gfx3d_GetLineData15bpp(int line, u16** dst)

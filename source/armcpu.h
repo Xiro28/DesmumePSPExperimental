@@ -365,9 +365,11 @@ template<int PROCNUM, bool jit> u32 armcpu_exec();
 void setIF(int PROCNUM, u32 flag);
 char* decodeIntruction(bool thumb_mode, u32 instr);
 
-static INLINE void NDS_makeIrq(int PROCNUM, u32 num)
+static FORCEINLINE void NDS_makeIrq(int PROCNUM, u32 num)
 {
-	setIF(PROCNUM,1<<num);
+	MMU.reg_IF_bits[ARM9] |= 1<<num;
+	
+	*(bool*)(0x00010000) = true; //reschedule
 }
 
 #endif

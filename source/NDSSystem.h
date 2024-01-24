@@ -147,7 +147,11 @@ extern void debug();
 void emu_halt();
 
 extern u64 nds_timer;
-void NDS_Reschedule();
+
+//fast reschedule
+#define NDS_ReschedulePtr (*(bool*)(0x00010000))
+#define NDS_Reschedule() NDS_ReschedulePtr = true
+
 void NDS_RescheduleGXFIFO(u32 cost);
 void NDS_RescheduleDMA();
 void NDS_RescheduleReadSlot1(int procnum, int size);

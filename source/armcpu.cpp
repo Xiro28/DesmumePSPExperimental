@@ -695,7 +695,7 @@ void arm_jit_sync()
 {
 	//NDS_ARM7.next_instruction = NDS_ARM7.instruct_adr;
 	NDS_ARM9.next_instruction = NDS_ARM9.instruct_adr;
-	armcpu_prefetch<0>();
+	armcpu_prefetch<ARM9>();
 	//armcpu_prefetch<1>();
 }
 

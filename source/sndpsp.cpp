@@ -42,11 +42,16 @@ void SNDPSPSetVolume(int volume);
 #define DEFAULT_SAMPLES 512
 #define VOLUME_MAX      0x8000
 
+static u16 *stereodata16;
+static u16 *outputbuffer;
 static u32 soundoffset;
-static u32 soundpos;
+static volatile u32 soundpos;
 static u32 soundlen;
 static u32 soundbufsize;
-static u16* stereodata16;
+static u32 samplecount;
+
+static int handle;
+static int stopAudio;
 
 SoundInterface_struct SNDPSP = {
 SNDCORE_PSP,
@@ -60,24 +65,41 @@ SNDPSPUnMuteAudio,
 SNDPSPSetVolume
 };
 
-static void MixAudio(void* userdata, u8* stream, u32 len) {
+void MixAudio(void * stream, u32 len, void *userdata) {
     int i;
     u8* soundbuf = (u8*)stereodata16;
+    u8* ubuf = (u8*) stream;
 
     for (i = 0; i < len; i++)
     {
         if (soundpos >= soundbufsize)
             soundpos = 0;
-
-        stream[i] = soundbuf[soundpos];
+            
+        u8 sample = soundbuf[soundpos];
+        ubuf[i] = sample;
         soundpos++;
     }
 }
 
+/*void Sound_Thread(void* buf, unsigned int length, void *userdata)
+{
+   samplecount = PSP_AUDIO_SAMPLE_ALIGN(2048);
+
+   int channel = sceAudioChReserve(PSP_AUDIO_NEXT_CHANNEL, samplecount, PSP_AUDIO_FORMAT_STEREO);
+   
+   while (!stopAudio)
+   {
+        MixAudio((uint8_t*)outputbuffer, 2048 * 4);
+        sceAudioOutput(channel, VOLUME_MAX, outputbuffer);
+      
+   }
+
+   sceAudioChRelease(handle);
+   sceKernelExitThread(0);
+}*/
+
 int SNDPSPInit(int buffersize)
 {
-    int i, j, failed;
-
     const int freq = 44100;
     const int samples = (freq / 60) * 2;
 
@@ -89,37 +111,24 @@ int SNDPSPInit(int buffersize)
     soundbufsize = buffersize * sizeof(s16) * 2;
     soundpos = 0;
 
-    int ret = pl_snd_init(normSamples, 1);
-    pl_snd_set_callback(0, MixAudio, (void*)0);
-
-    if ((stereodata16 = (u16*)malloc(soundbufsize)) == NULL)
+    stereodata16 = (u16 *)malloc(soundbufsize);
+    if (stereodata16 == NULL)
         return -1;
 
     memset(stereodata16, 0, soundbufsize);
-    
-    printf("\n\nAUDIO PSP Inited: %d\n",ret);
 
-   return ret;
+    pspAudioInit();
+
+    pspAudioSetChannelCallback(0, MixAudio, NULL);
+
+    return 0;
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
 void SNDPSPDeInit()
 {
-/*
-#ifdef _XBOX
-	doterminate = true;
-	while(!terminated) {
-		Sleep(1);
-	}
-#endif
-*/
-
-/*   if (stereodata16)
-      free(stereodata16);*/
-
-    pl_snd_shutdown();
-  
+    stopAudio = 1;  
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -128,7 +137,6 @@ void SNDPSPUpdateAudio(s16 *buffer, u32 num_samples)
 {
     u32 copy1size = 0, copy2size = 0;
 
-   pl_snd_pause(0);
    if ((soundbufsize - soundoffset) < (num_samples * sizeof(s16) * 2))
    {
        copy1size = (soundbufsize - soundoffset);
@@ -147,9 +155,6 @@ void SNDPSPUpdateAudio(s16 *buffer, u32 num_samples)
 
    soundoffset += copy1size + copy2size;
    soundoffset %= soundbufsize;
-
-   pl_snd_resume(0);
-
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -170,14 +175,14 @@ u32 SNDPSPGetAudioSpace()
 
 void SNDPSPMuteAudio()
 {
-    pl_snd_pause(0);
+    
 }
 
 //////////////////////////////////////////////////////////////////////////////
 
 void SNDPSPUnMuteAudio()
 {
-    pl_snd_resume(0);
+    
 }
 
 //////////////////////////////////////////////////////////////////////////////

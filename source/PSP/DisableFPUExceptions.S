@@ -35,24 +35,24 @@ set_op_logic_flags:
 set_sub_flags: 
 
     # $28 = flags (4 = V, 5 = C, 6 = Z, 7 = N)
+    # Corretto controllato con emulatore arm
 
     # C
-    SLTU $8, $2, $4     
-    INS  $28, $8, 5, 1   
-
-    # N
-    SRL  $12, $2, 31
-    INS  $28, $12, 7, 1  
+    SLTU $t0, $a0, $a1    
+    XORI $t0, $t0, 1    
+    INS  $28, $t0, 5, 1   # 
 
     # Z 
-    SLTIU $8, $2, 1
-    INS  $28, $8, 6, 1   
+    SLTIU $8, $v0, 1
+    INS  $28, $8, 6, 1 
 
-    # V
-    XOR $10, $4, $5       
-    XOR $11, $2, $5 
-    AND $10, $11, $10      
-    EXT $8, $10, 31, 0
+    # N
+    SRL  $v1, $v0, 31
+    INS  $28, $v1, 7, 1   
+
+    # V           
+    SLTU $8, $4, $5
+    XOR $8, $8, $v1 
     JR   $31           
     INS  $28, $8, 4, 1   
 

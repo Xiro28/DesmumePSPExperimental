@@ -488,7 +488,7 @@ static void encrypt_arm9(u32 cardheader_gamecode, unsigned char *data)
 //0x0200 - 0x3FFF : typically, nothing is stored here. on retail cards, you can't read from that area anyway, but im not sure if that's done in the game card or the GC bus controller on the system
 //0x4000 - 0x7FFF : secure area (details in gbatek)
 
-bool DecryptSecureArea(u8 *romheader, u8 *secure)
+int DecryptSecureArea(u8 *romheader, u8 *secure)
 {
 	//this looks like it will only work on little endian hosts
 	Header* header = (Header*)romheader;
@@ -496,7 +496,7 @@ bool DecryptSecureArea(u8 *romheader, u8 *secure)
 	int romType = DetectRomType(*header, (char*)secure);
 
 	if(romType == ROMTYPE_INVALID)
-		return false;
+		return -1;
 
 	// check if ROM is already encrypted
 	if (romType == ROMTYPE_NDSDUMPED)
@@ -514,16 +514,17 @@ bool DecryptSecureArea(u8 *romheader, u8 *secure)
 		//memcpy(romdata+0x4000,data,0x800);
 
 		if (!decrypt_arm9(*(u32 *)header->gamecode, secure))
-			return false;
+			return -1;
 
 		printf("Decrypted.\n");
 	}
 	else
 	{
 		printf("File doesn't appear to have a secure area.\n");
+		return 0;
 	}
 
-	return true;
+	return 1;
 }
 
 bool EncryptSecureArea(u8 *romheader, u8 *secure)

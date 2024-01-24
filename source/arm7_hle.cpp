@@ -51,7 +51,7 @@ void SendIPCReply(u32 service, u32 data, u32 flag)
         IPCFIFO7.Write(val);
         if ((IPCFIFOCnt9 & 0x0400) && wasempty)
             NDS_makeIrq(0, IRQ_BIT_IPCFIFO_RECVNONEMPTY);
-
+        
         NDS_Reschedule();
     }
 }
@@ -112,17 +112,17 @@ void OnIPCRequest_CartSave(u32 data)
             u32 dst = _MMU_read32<ARMCPU_ARM7>(SM_Buffer+0x10);
             u32 len = _MMU_read32<ARMCPU_ARM7>(SM_Buffer+0x14);
 
-            u32 memlen = saveSizes[MMU_new.backupDevice.info.type]-1;
+            u32 memlen = MMU_new.backupDevice.info.mem_size-1;
 
             //printf("SAVEMEM: read %08X %08X %08X %08X\n", offset, dst, len, memlen);
-
-            for (u32 i = 0; i < len; i++)
-            {
-                u8 val= MMU_new.backupDevice.readByte(offset & memlen, 0);
-                _MMU_write08<ARMCPU_ARM7>(dst, val);
-                dst++;
-                offset++;
-            }
+            if (memlen)
+                for (u32 i = 0; i < len; i++)
+                {
+                    u8 val= MMU_new.backupDevice.readByte(offset & memlen, 0);
+                    _MMU_write08<ARMCPU_ARM7>(dst, val);
+                    dst++;
+                    offset++;
+                }
 
             SendIPCReply(0xB, 0x1, 1);
             SM_DataPos = 0;  
@@ -178,7 +178,7 @@ void Touchscreen_Sample()
 {
     u32 ts = _MMU_read16<ARMCPU_ARM7>(0x027FFFAA) | (_MMU_read16<ARMCPU_ARM7>(0x027FFFAC) << 16);
     
-    if (!nds.hw_status.Touching)
+    if (nds.scr_touchY == 0xFFF)
     {
         ts &= 0xFE000000;
         ts |= 0x06000000;
@@ -298,7 +298,7 @@ void OnIPCRequest_Powerman(u32 data)
     if (!(data & (1<<24))) return;
 
     u32 cmd = (PM_Data[0] >> 8) - 0x60;
-    //printf("PM CMD %04X %04X\n", PM_Data[0], PM_Data[1]);
+    //printf("PM CMD %d %04X %04X\n", cmd, PM_Data[0], PM_Data[1]);
     switch (cmd)
     {
     case 1:
@@ -368,11 +368,10 @@ void OnIPCRequest_Powerman(u32 data)
             u8 addr = PM_Data[0] & 0xFF;
             u8 val = PM_Data[1] & 0xFF;
 
-            u8 reg = (addr & 0x7F) & 0x7;
+            extern void MMU_writePowerMan(u8 val, bool hold);
 
-            if(reg==5 || reg==6 || reg==7) reg = 4;
-
-            MMU.powerMan_Reg[reg] = (u8)val;
+            MMU_writePowerMan(addr & 0x7F, true);
+            MMU_writePowerMan(val, false);
 
             SendIPCReply(0x8, 0x03008000 | (((PM_Data[1] + 0x70) & 0xFF) << 8));
         }
@@ -383,10 +382,20 @@ void OnIPCRequest_Powerman(u32 data)
             u8 addr = PM_Data[0] & 0xFF;
             u8 reg = (addr & 0x7F) & 0x7;
 
-            if(reg==5 || reg==6 || reg==7) reg = 4;
+            extern u32 MMU_readPowerMan();
 
-            u8 ret = MMU.powerMan_Reg[reg];
-            SendIPCReply(0x8, 0x03008000 | ret | (((PM_Data[1] + 0x70) & 0xFF) << 8));
+            extern void MMU_writePowerMan(u8 val, bool hold);
+
+            MMU_writePowerMan((addr & 0x7F) | 0x80, true);
+            MMU_writePowerMan(0, false);
+
+            u8 ret = MMU_readPowerMan();
+
+            //printf("PM read %02X %02X\n", addr, ret);
+
+            //TODO fix me!
+
+            SendIPCReply(0x8, 0x03008000 | 0 | (((PM_Data[1] + 0x70) & 0xFF) << 8));
         }
         break;
 
@@ -414,10 +423,10 @@ void RTC_Read(u8 reg, u32 addr, u32 len)
 
     for (u32 i = 0; i < len; i++)
     {
-        //printf("%d: %02X\n", i, rtc.data[i]);
+        //printf("%d: %d\n", i, rtc.data[i]);
         _MMU_write08<ARMCPU_ARM7>(addr+i, rtc.data[i]);
     }
-    rtc.cmd = old_cmd;
+    //rtc.cmd = old_cmd;
 }
 
 void OnIPCRequest_RTC(u32 data)
@@ -508,7 +517,7 @@ void OnIPCRequest_Firmware(u32 data)
 
             for (u32 i = 0; i < len; i++)
             {
-                u8 val = MMU.fw.data[src & (0x40000 -1)];
+                u8 val = MMU.fw.data[src & (0x20000 -1)];
                 _MMU_write08<ARMCPU_ARM7>(addr, val);
                 src++;
                 addr++;
@@ -534,7 +543,7 @@ void OnIPCRequest_Firmware(u32 data)
             for (u32 i = 0; i < len; i++)
             {
                 u8 val =_MMU_read08<ARMCPU_ARM7>(addr);
-                MMU.fw.data[dst & (0x40000 -1)] = val;
+                MMU.fw.data[dst & (0x20000 -1)] = val;
                 dst++;
                 addr++;
             }
@@ -603,10 +612,11 @@ void OnIPCRequest()
 {
     u32 val = IPCFIFO9.Read();
 
-    if (IPCFIFO9.IsEmpty() && (IPCFIFOCnt9 & 0x0004)){
+    if (IPCFIFO9.IsEmpty() && (IPCFIFOCnt9 & 0x0004))
         NDS_makeIrq(0, IRQ_BIT_IPCFIFO_SENDEMPTY);
-        NDS_Reschedule();
-    }
+
+    
+    //printf("%d %d\n", IPCFIFO9.Level(), IPCFIFO7.Level());
 
     u32 service = val & 0x1F;
     u32 data = val >> 6;
@@ -698,7 +708,7 @@ void StartScanline(u32 line)
 void executeARM7Stuff(){
     extern u16 get_keypad();
 	_MMU_write16<ARMCPU_ARM7>(0x027FFFA8, get_keypad());
-    Sound_Nitro::Process(1);
+    //Sound_Nitro::Process(1);
 }
 
 void HLE_IPCSYNC(){

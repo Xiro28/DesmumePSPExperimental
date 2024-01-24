@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vector>
+#include <unordered_map>
 
 
 #include "MMU.h"
@@ -91,15 +92,20 @@ static u32 JIT_MASK[32] = {
       /* FX*/  DUP2(0x00007FFF)
 };
 
+// create hashmap for fast lookup of code blocks
+std::unordered_map<uint32_t, uint32_t> codeCacheLinked;
+
 static void init_jit_mem()
 {
    static bool inited = false;  
-   if(inited)
-      return;
-   inited = true;
+  
       for(int i=0; i<0x4000; i++)
          JIT.JIT_MEM[i] = JIT_MEM[i>>9] + (((i<<14) & JIT_MASK[i>>9]) >> 1);
    
+   if (inited) return;
+
+   inited = true;
+   initCodeCache();
    currentBlock.init(); 
 } 
 
@@ -136,7 +142,23 @@ static bool instr_is_branch(u32 opcode)
           || (x & JIT_BYPASS);
 }
 
-enum INSTR_R { DYNAREC, INTERPRET };
+static int instr_cycles(u32 opcode)
+{
+	u32 x = instr_attributes(opcode);
+	u32 c = (x & INSTR_CYCLES_MASK);
+	if(c == INSTR_CYCLES_VARIABLE)
+	{
+		if ((x & BRANCH_SWI))
+			return 3;
+		
+		return 0;
+	}
+	if(instr_is_branch(opcode) && !(instr_attributes(opcode) & (BRANCH_ALWAYS|BRANCH_LDM)))
+		c += 2;
+	return c;
+}
+
+enum INSTR_R { DYNAREC, DYNAREC_BRANCH, INTERPRET };
 
 typedef INSTR_R (*DynaCompiler)(uint32_t pc, uint32_t opcode);
 
@@ -313,9 +335,7 @@ static INSTR_R ARM_OP_ADC_IMM_VAL(uint32_t pc, const u32 i) { return INTERPRET; 
  
 static INSTR_R ARM_OP_MOV_LSL_IMM (uint32_t pc, const u32 i)
 {
-   if (i == 0xE1A00000)
-      currentBlock.addOP(OP_NOP, pc, 0, 0, 0, 0, PRE_OP_NONE, -1);
-   else
+   if (i != 0xE1A00000)
       currentBlock.addOP(OP_MOV, pc, REG_POS(i,12), REG_POS(i,16), REG_POS(i, 0), ((i>>7)&0x1F), PRE_OP_LSL_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    
    return DYNAREC; 
@@ -361,22 +381,24 @@ static INSTR_R ARM_OP_MVN_IMM_VAL(uint32_t pc, const u32 i)
 
 #define use_flagOPS
 #ifdef use_flagOPS
-/*
-ARM_OP_IMM_(CMP, LSL_IMM, -1)
-ARM_OP_REG_(CMP, LSL_REG, -1)
-ARM_OP_IMM_(CMP, LSR_IMM, -1)
-ARM_OP_REG_(CMP, LSR_REG, -1)
-ARM_OP_IMM_(CMP, ASR_IMM, -1)
+
+disable_op(CMP, LSL_IMM, -1)
+disable_op(CMP, LSL_REG, -1)
+disable_op(CMP, LSR_IMM, -1)
+disable_op(CMP, LSR_REG, -1)
+disable_op(CMP, ASR_IMM, -1)
 static INSTR_R ARM_OP_CMP_ASR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_CMP_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; } 
 static INSTR_R ARM_OP_CMP_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
 static INSTR_R ARM_OP_CMP_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_CMP, pc, -1, REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
-   return DYNAREC; 
-}*/
+   return INTERPRET;
 
-ARM_OP_UNDEF(CMP );
+   currentBlock.addOP(OP_CMP, pc, -1, REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
+   return DYNAREC; 
+}
+
+//ARM_OP_UNDEF(CMP );
 ARM_OP_UNDEF(TST );
 /*/
 ARM_OP_IMM_(TST, LSL_IMM, -1)
@@ -393,7 +415,7 @@ static INSTR_R ARM_OP_TST_IMM_VAL(uint32_t pc, const u32 i)
    return DYNAREC; 
 }*/
 
-disable_op(AND_S, LSL_IMM)
+/*disable_op(AND_S, LSL_IMM)
 ARM_OP_REG(AND_S, LSL_REG)
 ARM_OP_IMM(AND_S, LSR_IMM)
 ARM_OP_REG(AND_S, LSR_REG)
@@ -434,9 +456,15 @@ static INSTR_R ARM_OP_EOR_S_IMM_VAL(uint32_t pc, const u32 i)
 { 
    currentBlock.addOP(OP_EOR_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC;
-}
+}*/
 
-disable_op(MOV_S, LSL_IMM)
+   ARM_OP_UNDEF(AND_S);
+   ARM_OP_UNDEF(EOR_S);
+   ARM_OP_UNDEF(ORR_S);
+   ARM_OP_UNDEF(MOV_S);
+   ARM_OP_UNDEF(MVN_S);
+
+/*disable_op(MOV_S, LSL_IMM)
 ARM_OP_REG(MOV_S, LSL_REG)
 ARM_OP_IMM(MOV_S, LSR_IMM)
 ARM_OP_REG(MOV_S, LSR_REG)
@@ -462,7 +490,7 @@ static INSTR_R ARM_OP_MVN_S_IMM_VAL(uint32_t pc, const u32 i)
 { 
    currentBlock.addOP(OP_MOV_S, pc, REG_POS(i, 12), -1, -1, ~ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
    return DYNAREC; 
-}
+}*/
 
 #else
    
@@ -481,12 +509,12 @@ ARM_OP_REG(SUB_S, LSL_REG)
 ARM_OP_IMM(SUB_S, LSR_IMM)
 ARM_OP_REG(SUB_S, LSR_REG)
 ARM_OP_IMM(SUB_S, ASR_IMM)
-static OP_RESULT ARM_OP_SUB_S_ASR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
-static OP_RESULT ARM_OP_SUB_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; }
-static OP_RESULT ARM_OP_SUB_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
-static OP_RESULT ARM_OP_SUB_S_IMM_VAL(uint32_t pc, const u32 i) 
+static INSTR_R ARM_OP_SUB_S_ASR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
+static INSTR_R ARM_OP_SUB_S_ROR_IMM(uint32_t pc, const u32 i) { return INTERPRET; }
+static INSTR_R ARM_OP_SUB_S_ROR_REG(uint32_t pc, const u32 i) { return INTERPRET; }
+static INSTR_R ARM_OP_SUB_S_IMM_VAL(uint32_t pc, const u32 i) 
 { 
-   currentBlock.addOP(OP_SUB_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   currentBlock.addOP(OP_SUB_S, pc, REG_POS(i, 12), REG_POS(i,16), -1, ROR((i&0xFF), (i>>7)&0x1E), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1);
    return DYNAREC; 
 }*/
  
@@ -512,7 +540,8 @@ static INSTR_R ARM_OP_MUL(uint32_t pc, const u32 i)
 } 
 
 static INSTR_R ARM_OP_MLA(uint32_t pc, const u32 i) {
-   return INTERPRET;
+   currentBlock.addOP(OP_MLA, pc, REG_POS(i,16), REG_POS(i,0), REG_POS(i,8), REG_POS(i,12), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+   return DYNAREC; 
 }
 
 
@@ -595,7 +624,7 @@ ARM_MEM_OP_DEF(LDRB);
 
 inline bool isMainMemory(u32 addr)
 {
-   return ((addr & 0x0F000000) == 0x02000000) && ((addr&(~0x3FFF)) != MMU.DTCMRegion);
+   return ((addr & 0x0F000000) == 0x02000000);
 }
 
 inline bool isDTCM(u32 addr)
@@ -604,32 +633,50 @@ inline bool isDTCM(u32 addr)
 }
 
 static INSTR_R ARM_OP_STR_P_IMM_OFF_PREIND(uint32_t pc, const u32 i){
-   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STR_M_IMM_OFF_PREIND(uint32_t pc, const u32 i){
-   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STR_M_IMM_OFF(uint32_t pc, const u32 i){
-   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1, -((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1, -((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STR_P_IMM_OFF(uint32_t pc, const u32 i){
-   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STR_M_IMM_OFF_POSTIND(uint32_t pc, const u32 i){
-   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STR_P_IMM_OFF_POSTIND(uint32_t pc, const u32 i){
-   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STR, pc, REG_POS(i,16), REG_POS(i,12), -1,  ((i)&0xFFF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
@@ -673,10 +720,7 @@ static INSTR_R ARM_OP_LDR_P_IMM_OFF(uint32_t pc, const u32 i){
 
    u32 addr = _ARMPROC.R[REG_POS(i,16)] + ((i)&0xFFF);
 
-   /*if (isDTCM(addr))
-      currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, EXTFL_DIRECTDTCM);
-   else*/
-      currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   currentBlock.addOP(OP_LDR, pc, REG_POS(i,12), REG_POS(i,16), -1, ((i)&0xFFF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    
    return DYNAREC; 
 }
@@ -753,30 +797,42 @@ static INSTR_R ARM_OP_STRH_M_IMM_OFF(uint32_t pc, const u32 i)
 }
 
 static INSTR_R ARM_OP_STRH_P_REG_OFF(uint32_t pc, const u32 i)
-{   
+{  
    return INTERPRET;
-   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i, 12), REG_POS(i,0), -1, PRE_OP_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i, 12), REG_POS(i,0), 0, PRE_OP_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_STRH_M_REG_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
-   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 0), REG_POS(i, 16), REG_POS(i,12), -1, PRE_OP_REG_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i, 12), REG_POS(i,0), 0, PRE_OP_M_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_PRE_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
-   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_PRE_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
-   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
@@ -793,14 +849,20 @@ static INSTR_R ARM_OP_STRH_PRE_INDE_M_REG_OFF(uint32_t pc, const u32 i)
 static INSTR_R ARM_OP_STRH_POS_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
-   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
 static INSTR_R ARM_OP_STRH_POS_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
-   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   
+   u32 addr = _ARMPROC.R[REG_POS(i,16)];
+
+   currentBlock.addOP(OP_STRH, pc, REG_POS(i, 16), REG_POS(i,12), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
@@ -819,6 +881,7 @@ static INSTR_R ARM_OP_STRH_POS_INDE_M_REG_OFF(uint32_t pc, const u32 i)
 static INSTR_R ARM_OP_LDRH_P_IMM_OFF(uint32_t pc, const u32 i)
 {
    u32 addr = _ARMPROC.R[REG_POS(i, 16)] + (((i>>4)&0xF0)+(i&0xF));
+
    currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_IMM, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
@@ -831,28 +894,34 @@ static INSTR_R ARM_OP_LDRH_M_IMM_OFF(uint32_t pc, const u32 i)
 }
 
 static INSTR_R ARM_OP_LDRH_P_REG_OFF(uint32_t pc, const u32 i)
-{   
-   return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), REG_POS(i, 0), 0, PRE_OP_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+{  
+   u32 addr = _ARMPROC.R[REG_POS(i,16)] + _ARMPROC.R[REG_POS(i,0)];
+
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), REG_POS(i, 0), 0, PRE_OP_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1,  isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_LDRH_M_REG_OFF(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
+   u32 addr = _ARMPROC.R[REG_POS(i,16)] - _ARMPROC.R[REG_POS(i,0)];
+
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), REG_POS(i, 0), 0, PRE_OP_M_REG_OFF, instr_is_conditional(i) ? CONDITION(i) : -1,  isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
+   return DYNAREC; 
 }
 
 static INSTR_R ARM_OP_LDRH_PRE_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
-    return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   u32 addr = _ARMPROC.R[REG_POS(i,16)] + ((i>>4)&0xF0)+(i&0xF);
+
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
 static INSTR_R ARM_OP_LDRH_PRE_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
-    return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   u32 addr = _ARMPROC.R[REG_POS(i,16)] -((i>>4)&0xF0)+(i&0xF);
+
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_PRE_M, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
@@ -868,15 +937,21 @@ static INSTR_R ARM_OP_LDRH_PRE_INDE_M_REG_OFF(uint32_t pc, const u32 i)
 
 static INSTR_R ARM_OP_LDRH_POS_INDE_P_IMM_OFF(uint32_t pc, const u32 i)
 {
-    return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   return INTERPRET;
+
+   u32 addr = _ARMPROC.R[REG_POS(i,16)] + ((i>>4)&0xF0)+(i&0xF);
+
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_P, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
 static INSTR_R ARM_OP_LDRH_POS_INDE_M_IMM_OFF(uint32_t pc, const u32 i)
 {
-    return INTERPRET;
-   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1,EXTFL_NONE);
+   u32 addr = _ARMPROC.R[REG_POS(i,16)] - ((i>>4)&0xF0)+(i&0xF);
+
+   printf("LDRH_POS_INDE_M_IMM_OFF\n");
+
+   currentBlock.addOP(OP_LDRH, pc, REG_POS(i,12), REG_POS(i, 16), -1, ((i>>4)&0xF0)+(i&0xF), PRE_OP_POST_M, instr_is_conditional(i) ? CONDITION(i) : -1, isMainMemory(addr) ? EXTFL_DIRECTMEMACCESS : EXTFL_NONE);
    return DYNAREC;
 }
 
@@ -894,16 +969,20 @@ static INSTR_R ARM_OP_LDRH_POS_INDE_M_REG_OFF(uint32_t pc, const u32 i)
 
 static INSTR_R ARM_OP_B(uint32_t pc, const u32 i)
 {
-   u32 tmp = _ARMPROC.R[15];
-   u32 off = SIGNEXTEND_24(i);
-   bool _thumb = (CONDITION(i)==0xF);
+	if(CONDITION(i)==0xF)
+	{
+		return INTERPRET;
+	}
 
-	tmp += (off<<2);
+	u32 off = SIGNEXTEND_24(i);
+   
+   if (currentBlock.branch_addr == currentBlock.start_addr) 
+      printf("WARNING: B to self\n");
 
-	currentBlock.branch_addr = tmp & (0xFFFFFFFC|(BIT0(tmp)<<1));
-
-   //if (currentBlock.branch_addr == currentBlock.start_addr) printf("WARNING: B to self\n");
-   return INTERPRET;
+   
+   currentBlock.addOP(OP_BXC, pc, -1, -1, -1, (off<<2), PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+   
+   return DYNAREC_BRANCH;
 }
 
 #define ARM_OP_BL 0
@@ -935,9 +1014,14 @@ static INSTR_R ARM_OP_SWP (uint32_t pc, const u32 i) { return INTERPRET;  };
 static INSTR_R ARM_OP_SWPB(uint32_t pc, const u32 i) { return INTERPRET;  };
 
 static INSTR_R ARM_OP_MCR(uint32_t pc, const u32 i){ 
+   //currentBlock.addOP(OP_MRC_MCR, pc);
    return INTERPRET;
 }
-
+static INSTR_R ARM_OP_MRC(uint32_t pc, const u32 i){ 
+   //currentBlock.addOP(OP_MRC_MCR, pc);
+   return INTERPRET;
+}
+ 
 
 
 static INSTR_R ARM_OP_SWI(uint32_t pc, const u32 i){
@@ -945,11 +1029,29 @@ static INSTR_R ARM_OP_SWI(uint32_t pc, const u32 i){
    return DYNAREC;
 }
 
+bool abc = false;
+
 static INSTR_R ARM_OP_BX(uint32_t pc, const u32 i){
    u32 tmp = _ARMPROC.R[REG_POS(i, 0)];
 	currentBlock.branch_addr = tmp & (0xFFFFFFFC|(BIT0(tmp)<<1));
 
-   if (currentBlock.branch_addr == currentBlock.start_addr) printf("WARNING: BX to self\n");
+   //if (currentBlock.branch_addr == currentBlock.start_addr) printf("WARNING: BX to self\n");
+
+   //ArmOpCompiled f = (ArmOpCompiled)JIT_COMPILED_FUNC(currentBlock.branch_addr, ARM9);
+
+   //if (f && codeCacheLinked[currentBlock.branch_addr] == 0 && codeCacheLinked[currentBlock.start_addr] == 0)
+   /*if (currentBlock.branch_addr == currentBlock.start_addr && !codeCacheLinked[currentBlock.branch_addr] && !BIT0(tmp))
+   {
+      //printf("BX to its self\n");
+      codeCacheLinked[currentBlock.branch_addr] = currentBlock.start_addr;
+      currentBlock.addOP(OP_BXC, pc, -1, REG_POS(i, 0), -1, -1, PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+      //currentBlock.addOP(OP_BXC, pc, interpreted_cycles, -1, -1, -1, PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+      return DYNAREC_BRANCH;
+   }*/
+
+   /*currentBlock.addOP(OP_BXC, pc, -1, REG_POS(i, 0), -1, -1, PRE_OP_NONE, instr_is_conditional(i) ? CONDITION(i) : -1);
+   return DYNAREC_BRANCH;*/
+
    return INTERPRET;
 }
 
@@ -970,7 +1072,7 @@ static INSTR_R ARM_OP_STMIA(uint32_t pc, const u32 i){
 
 #define ARM_OP_LDRD_STRD_OFFSET_PRE_INDEX 0
 #define ARM_OP_MSR_CPSR 0
-#define ARM_OP_BX 0
+//#define ARM_OP_BX 0
 #define ARM_OP_BLX_REG 0
 #define ARM_OP_BKPT 0
 #define ARM_OP_MSR_SPSR 0
@@ -1025,7 +1127,6 @@ static INSTR_R ARM_OP_STMIA(uint32_t pc, const u32 i){
 #define ARM_OP_STC_P_PREIND 0
 #define ARM_OP_LDC_P_PREIND 0
 #define ARM_OP_CDP 0
-#define ARM_OP_MRC 0
 #define ARM_OP_UND 0
 static const DynaCompiler arm_instruction_compilers[4096] = {
 #define TABDECL(x) ARM_##x
@@ -1183,13 +1284,14 @@ static INSTR_R THUMB_OP_ORR(uint32_t pc, const u32 i)
 //-----------------------------------------------------------------------------
 static INSTR_R THUMB_OP_TST(uint32_t pc, const u32 i)
 {
+   
    currentBlock.addOP(OP_TST, pc, -1, _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
 
 static INSTR_R THUMB_OP_CMP(uint32_t pc, const u32 i)
 {
-   return INTERPRET; 
+   return INTERPRET;
    currentBlock.addOP(OP_CMP, pc, -1, _REG_NUM(i, 0), _REG_NUM(i, 3));
    return DYNAREC; 
 }
@@ -1293,17 +1395,20 @@ static INSTR_R THUMB_OP_STRH_REG_OFF(uint32_t pc, const u32 i)
 {
    return INTERPRET;
    currentBlock.addOP(OP_STRH, pc, _REG_NUM(i, 3), _REG_NUM(i,0), _REG_NUM(i,6), 0, PRE_OP_REG_OFF, -2);
+   return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_LDRH_REG_OFF(uint32_t pc, const u32 i)
 {
    u32 adr = _ARMPROC.R[_REG_NUM(i, 3)] + _ARMPROC.R[_REG_NUM(i, 6)];
 
-   return INTERPRET;
+
    /*if (isMainMemory(adr))
       currentBlock.addOP(OP_LDRH, pc, _REG_NUM(i,0), _REG_NUM(i, 3), _REG_NUM(i, 6), -1, PRE_OP_REG_OFF, -1, EXTFL_DIRECTMEMACCESS);
    else*/
       currentBlock.addOP(OP_LDRH, pc, _REG_NUM(i,0), _REG_NUM(i, 3), _REG_NUM(i, 6), -1, PRE_OP_REG_OFF);
+
+   return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_STRB_IMM_OFF(uint32_t pc, const u32 i)
@@ -1320,9 +1425,11 @@ static INSTR_R THUMB_OP_STRH_IMM_OFF(uint32_t pc, const u32 i)
 {
    u32 adr = _ARMPROC.R[_REG_NUM(i, 3)] + ((i>>5)&0x3E);
 
-   if (isMainMemory(adr))
+   return INTERPRET;
+
+   /*if (isMainMemory(adr))
       currentBlock.addOP(OP_STRH, pc, _REG_NUM(i, 3), _REG_NUM(i, 0), -1, ((i>>5)&0x3E), PRE_OP_IMM, -2, EXTFL_DIRECTMEMACCESS);
-   else
+   else*/
       currentBlock.addOP(OP_STRH, pc, _REG_NUM(i, 3), _REG_NUM(i, 0), -1, ((i>>5)&0x3E), PRE_OP_IMM, -2);
    return DYNAREC;
 }
@@ -1359,14 +1466,12 @@ static INSTR_R THUMB_OP_STR_REG_OFF(uint32_t pc, const u32 i)
 
 static INSTR_R THUMB_OP_LDR_REG_OFF(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
    currentBlock.addOP(OP_LDR, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), _REG_NUM(i, 6), -1, PRE_OP_REG_OFF);
    return DYNAREC;
 }
 
 static INSTR_R THUMB_OP_LDR_IMM_OFF(uint32_t pc, const u32 i)
 {
-   return INTERPRET;
    currentBlock.addOP(OP_LDR, pc, _REG_NUM(i, 0), _REG_NUM(i, 3), -1, ((i>>4)&0x7C), PRE_OP_IMM);
    return DYNAREC;
 }
@@ -1514,7 +1619,7 @@ static u32 compile_basicblock()
 				reg_gpr+psp_fp,
 				reg_gpr+psp_ra);
    
-   if (thumb && (!currentBlock.onlyITP || currentBlock.getNOpcodes() > 1)) 
+   if (thumb && (!currentBlock.onlyITP)) 
       emit_mpush(5,
                reg_gpr+psp_s0,
                reg_gpr+psp_s1,
@@ -1525,13 +1630,16 @@ static u32 compile_basicblock()
    //StartCodeDump();
 
    emit_li(psp_k0,((u32)&ARMPROC), 2);
+   //emit_move(psp_k1, psp_zero);
 
    if (thumb){
       if (currentBlock.emitThumbBlock<PROCNUM>()) //idle loop
-         interpreted_cycles *= 1;
+         interpreted_cycles *= 100;
+         //printf("idle loop thumb\n");
    }else{
       if (currentBlock.emitArmBlock<PROCNUM>()) //idle loop
          interpreted_cycles *= 1;
+         // printf("idle loop arm\n");
    }
 
    /*if (strcmp(">:1:03:228FFE20:8DA0D787:049532BF:1CCCFF37:46FE1542", currentBlock.block_hash) == 0) {
@@ -1541,19 +1649,21 @@ static u32 compile_basicblock()
       die("Code dump\n");
    }*/ 
 
-   if (currentBlock.manualPrefetch) 
+   if (currentBlock.manualPrefetch)  
    {
       emit_lw(psp_at, RCPU, _next_instr);
       emit_sw(psp_at, RCPU, _instr_adr);
-   }
+   } 
 
-   if (thumb && (!currentBlock.onlyITP || currentBlock.getNOpcodes() > 1)) 
+   if (thumb && (!currentBlock.onlyITP))
       emit_mpop(5,
                reg_gpr+psp_s0,
                reg_gpr+psp_s1,
                reg_gpr+psp_s2,
                reg_gpr+psp_s3,
                reg_gpr+psp_s4);
+
+   emit_addiu(psp_v0, psp_zero, interpreted_cycles);
 
    emit_mpop(4,
 				reg_gpr+psp_gp,
@@ -1562,7 +1672,7 @@ static u32 compile_basicblock()
 				reg_gpr+psp_ra);
    
    emit_jra();
-   emit_movi(psp_v0, interpreted_cycles);
+   emit_nop();
    
    make_address_range_executable((u32)code_ptr, (u32)emit_GetPtr());
    JIT_COMPILED_FUNC(base_adr, PROCNUM) = (uintptr_t)code_ptr;
@@ -1592,9 +1702,9 @@ void build_ArmBasicblock(){
       uint32_t op = _MMU_read32<PROCNUM, MMU_AT_CODE>(pc&imask);
 
       DynaCompiler fc = arm_instruction_compilers[INSTRUCTION_INDEX(op)];
-      INSTR_R res = fc == 0 ? INTERPRET : fc(pc,op);;
+      INSTR_R res = fc == 0 ? INTERPRET : fc(pc,op);
 
-      has_ended = instr_is_branch(op) || (opnum >= (my_config.DynarecBlockSize - 1));
+      has_ended = (instr_is_branch(op) /*&& res == INTERPRET*/) || (opnum >= 20);
 
       if (res == INTERPRET) {
          currentBlock.addOP(OP_ITP, pc, -1, op, -1, -1, PRE_OP_NONE, instr_is_conditional(op) ? CONDITION(op) : -1);
@@ -1607,7 +1717,7 @@ void build_ArmBasicblock(){
       if (has_ended && (!instr_does_prefetch(op) || res == INTERPRET)) //prefetch next instruction
          currentBlock.manualPrefetch = true;
 
-      interpreted_cycles += op_decode[PROCNUM][false]();
+      interpreted_cycles += op_decode[PROCNUM][false]() + instr_cycles(op);
    }
 
    sceKernelUtilsSha1BlockResult(&ctx, (u8*)digest);
@@ -1642,20 +1752,40 @@ void build_ThumbBasicblock(){
       if (res == INTERPRET)
          currentBlock.addOP(OP_ITP, pc, -1, op, -1, -1, PRE_OP_NONE, false);
 
-      has_ended = instr_is_branch(op) || (i >= (my_config.DynarecBlockSize - 1));
+      has_ended = instr_is_branch(op) || (i >= 60);
       
       if (has_ended && (!instr_does_prefetch(op) || res == INTERPRET)) //prefetch next instruction
          currentBlock.manualPrefetch = true;
 
-      interpreted_cycles += op_decode[PROCNUM][true]();
+      interpreted_cycles += op_decode[PROCNUM][true]() + instr_cycles(op);
    }
+}
+
+void checkAndDeleteLinkedBLock(u32 addr){
+
+   auto it = codeCacheLinked[addr];
+
+   if (it == 0) return;
+
+   if (JIT_COMPILED_FUNC(it, ARM9) != 0 && JIT_COMPILED_FUNC(addr, ARM9) == 0){
+      printf("Linked block deleted\n");
+      JIT_COMPILED_FUNC(it, PROCNUM) = 0;
+      codeCacheLinked[addr] = 0;
+      codeCacheLinked[it] = 0;
+   }
+
+
+   /*if (it != 0  && *(u32*)JIT_COMPILED_FUNC(it, ARM9) != codeCacheLinkedByte[it]) {
+      
+      JIT_COMPILED_FUNC(addr, PROCNUM) = 0;
+      codeCacheLinked[addr] = 0;
+      codeCacheLinked[it] = 0;
+      codeCacheLinkedByte[it] = 0;
+   }*/
 }
 
 template<int PROCNUM> u32 arm_jit_compile()
 {
-
-   // prevent endless recompilation of self-modifying code, which would be a memleak since we only free code all at once.
-	// also allows us to clear compiled_funcs[] while leaving it sparsely allocated, if the OS does memory overcommit.
 	block_procnum = PROCNUM;
    interpreted_cycles = 0;
 
@@ -1663,16 +1793,6 @@ template<int PROCNUM> u32 arm_jit_compile()
    base_adr = ARMPROC.instruct_adr;
    pc = base_adr; 
 
-   currentBlock.start_addr = base_adr;
-
-	/*u32 mask_adr = (base_adr & 0x07FFFFFE) >> 4;
-	if(((recompile_counts[mask_adr >> 1] >> 4*(mask_adr & 1)) & 0xF) > 8)
-	{
-		ArmOpCompiled f = op_decode[PROCNUM][thumb];
-		JIT_COMPILED_FUNC(base_adr, PROCNUM) = (uintptr_t)f;
-		return f();
-	}
-	recompile_counts[mask_adr >> 1] += 1 << 4*(mask_adr & 1);*/
 
    if (GetFreeSpace() < 16 * 1024){
       //printf("Dynarec code reset\n");
@@ -1680,6 +1800,17 @@ template<int PROCNUM> u32 arm_jit_compile()
    }
 
    currentBlock.clearBlock(); 
+
+   // iterate over the addr of the hashmap codeCacheLinked
+   // and if the addr is contained as key of other addr, delete it
+
+   currentBlock.start_addr = base_adr;
+    if (codeCacheLinked[currentBlock.start_addr] != 0)
+      codeCacheLinked[currentBlock.start_addr] = 0;
+
+   /*ArmOpCompiled f = op_decode[PROCNUM][thumb];
+	JIT_COMPILED_FUNC(base_adr, PROCNUM) = (uintptr_t)f;
+	return f();*/
 
    if (!thumb) {
       build_ArmBasicblock<PROCNUM>(); 
@@ -1690,6 +1821,13 @@ template<int PROCNUM> u32 arm_jit_compile()
    }else{
       build_ThumbBasicblock<PROCNUM>();
       currentBlock.optimize_basicblockThumb();
+   }
+   
+   if (currentBlock.getNOpcodes() <= 1)
+   {
+      ArmOpCompiled f = op_decode[PROCNUM][thumb];
+		JIT_COMPILED_FUNC(base_adr, PROCNUM) = (uintptr_t)f;
+		return interpreted_cycles;
    }
 
    return compile_basicblock<PROCNUM>();
@@ -1715,10 +1853,6 @@ void arm_jit_reset(bool enable, bool suppress_msg)
          JITFREE(JIT.ARM9_ITCM);
          JITFREE(JIT.ARM9_LCDC);
          JITFREE(JIT.ARM9_BIOS);
-         JITFREE(JIT.ARM7_BIOS);
-         JITFREE(JIT.ARM7_ERAM);
-         JITFREE(JIT.ARM7_WIRAM);
-         JITFREE(JIT.ARM7_WRAM);
       #undef JITFREE
 
       //memset(recompile_counts, 0, sizeof(recompile_counts));

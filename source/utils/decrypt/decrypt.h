@@ -26,7 +26,7 @@
 extern const unsigned char arm7_key[];
 
 //decrypts the secure area of a rom (or does nothing if it is already decrypted)
-bool DecryptSecureArea(u8 *romheader, u8 *secure);
+int DecryptSecureArea(u8 *romheader, u8 *secure);
 
 //encrypts the secure area of a rom (or does nothing if it is already encrypted)
 bool EncryptSecureArea(u8 *romheader, u8 *secure);

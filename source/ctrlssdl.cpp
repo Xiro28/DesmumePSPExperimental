@@ -347,13 +347,8 @@ process_ctrls_event(u16 &keypad)
 	  }	else if (pad.Buttons & PSP_CTRL_SELECT) {
 	  	mouse.click = TRUE;
 	  }	else{
-		for(int i=0;i<12;i++) {
-
-			if (pad.Buttons & default_psp_cfg_h[i])
-				ADD_KEY(keypad, KEYMASK_(i));
-			else
-				RM_KEY(keypad, KEYMASK_(i));
-		}
+		for(int i=0;i<12;i++) 
+			ADD_KEY(keypad, !!(pad.Buttons & default_psp_cfg_h[i]) << i);
 	  }
 	  
 }

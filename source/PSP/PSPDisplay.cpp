@@ -42,7 +42,7 @@
 unsigned int __attribute__((aligned(64))) gulist[256 * 192 * 4];
 
 void*       frameBuffer   =  (void*)0;
-const void* doubleBuffer  =  (void*)0x44000;
+void* doubleBuffer  =  (void*)0x44000;
 const void* depthBuffer   =  (void*)0x88000;
 
 const int padding_top    = (1024 * 48);
@@ -176,16 +176,9 @@ void drawmenu() {
 			if (curr_posX == romX) intraFontPrintf(Font, 20, 240, "ROM: %s::%s", menu[romX].GetIconName(), menu[romX].GetFileName());
 		}
 
-	intraFontPrint(Font, 210, 15, "Pre Release");
+	intraFontPrint(Font, 210, 15, "Pre Release V2");
 	intraFontPrintf(Font, 390, 15, "Battery:%d%%", scePowerGetBatteryLifePercent());
 
-	sceGuFinish();
-	sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
-}
-
-void SetupDisp_EMU() {
-	sceGuStart(GU_DIRECT, gulist);
-	sceGuDrawBuffer(GU_PSM_5551, (void*)DISP_POINTER, 512);
 	sceGuFinish();
 	sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
 }
@@ -195,12 +188,6 @@ static const int scale = (int)(sw * (float)SLICE_SIZE) / (float)512;
 struct DispVertex* screen_gpuvtx;
 
 void DrawSliced(int dx){
-
-	/*sceGuClearColor(0);
-	sceGuClearDepth(0);
-	sceGuClearStencil(0);
-
-	sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT | GU_STENCIL_BUFFER_BIT);*/
 
 
     for (int start = 0, end = sw, idx = 0; start < end; start += SLICE_SIZE, dx += scale) {
@@ -250,7 +237,7 @@ void EMU_SCREEN() {
 	sceGuSync(0, 0);
 	sceGuStart(GU_DIRECT, gulist);
 
-	sceGuDrawBuffer(GU_PSM_5551, frameBuffer, GU_VRAM_WIDTH);
+	sceGuDrawBuffer(GU_PSM_5551, 0, GU_VRAM_WIDTH);
 
 	
 	sceGuEnable(GU_TEXTURE_2D);
@@ -261,7 +248,11 @@ void EMU_SCREEN() {
 
 	DrawSliced(0);
 
-	sceGuFinishId(0);
+	gpu3D->NDS_3D_Render();
+
+	sceGuFinish();
+
+	
 }
 
 
@@ -284,17 +275,14 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 	//Reset 3D buffer
 	//sceGuDrawBuffer(GU_PSM_5551, (void*)doubleBuffer, GU_VRAM_WIDTH);
 
-	sceGuDrawBuffer(GU_PSM_5551, frameBuffer, GU_VRAM_WIDTH);
-	sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, (void*)frameBuffer, GU_VRAM_WIDTH);
+	sceGuDrawBuffer(GU_PSM_5551, doubleBuffer, GU_VRAM_WIDTH);
+	sceGuDispBuffer(SCR_WIDTH, SCR_HEIGHT, (void*)doubleBuffer, GU_VRAM_WIDTH);
 	sceGuDepthBuffer((void*)depthBuffer, GU_VRAM_WIDTH);
 
 	//sceGuDrawBufferList(GU_PSM_5551, (void*)depthBuffer, 512);
 
 	sceGuDepthRange(65535, 0);
 
-	// Background color and disable scissor test
-	// because it is enabled by default with no size sets
-	sceGuClearColor(0xFF404040);
 	sceGuDisable(GU_SCISSOR_TEST);
 
 	sceGuDepthFunc(GU_GEQUAL);
@@ -328,7 +316,7 @@ void Init_PSP_DISPLAY_FRAMEBUFF() {
 	if (inited) return;
 	inited = true;
 
-	screen_gpuvtx = (struct DispVertex*)sceGuGetMemory(2 * SLICE_SIZE * sizeof(struct DispVertex));
+	screen_gpuvtx = (struct DispVertex*)((u32)sceGuGetMemory(2 * SLICE_SIZE * sizeof(struct DispVertex)) + (u32)doubleBuffer);
 
 	static const char* font = "flash0:/font/ltn1.pgf"; //small font
 	static const char* font2 = "flash0:/font/ltn0.pgf"; //small font

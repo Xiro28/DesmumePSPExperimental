@@ -65,7 +65,6 @@ PSP_MODULE_INFO("DesmuME PSP", 0, 3, 0);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
 
 
-
 //From Daedalus
 extern "C" {
 
@@ -166,10 +165,10 @@ static void desmume_cycle()
   if (my_config.showfps)
       ShowFPS(0,3);
 
-  NDS_exec<false>();
+  
 
-	if (my_config.enable_sound)
-		SPU_Emulate_user();
+	/*if (my_config.enable_sound)
+		SPU_Emulate_user();*/
 }
 
 
@@ -214,7 +213,7 @@ void EMU_Conf(){
   pspDebugScreenClear();
 
   if (my_config.enable_sound && !audio_inited) {
-	  SPU_ChangeSoundCore(SNDCORE_PSP, PSP_AUDIO_SAMPLE_MAX);
+	  SPU_ChangeSoundCore(SNDCORE_PSP, 735 * 4);
 	  SPU_SetSynchMode(0, 0 /*CommonSettings.SPU_sync_method*/);
 	  audio_inited = true;
   }
@@ -316,6 +315,8 @@ int main(int argc, char **argv) {
     EMU_Conf();
   #endif
 
+  
+
   EMU_SCREEN();
 
   printf("Ram: %d\n", RAMAMOUNT());
@@ -323,18 +324,19 @@ int main(int argc, char **argv) {
   while(execute)
   {
       
-    desmume_cycle();
-
     for ( int i = 0; i < my_config.frameskip; i++ ) {
         NDS_SkipNextFrame();
-        desmume_cycle();
+        NDS_exec<false>();
     }
+
+    desmume_cycle();
+    NDS_exec<false>();
 
     u32 curr_timing = sceKernelGetSystemTimeLow();
 
     fps_frame_counter += 1 + my_config.frameskip;   
 
-    //if (my_config.fps_cap)
+    if (my_config.fps_cap)
     {
         int delay =  (fps_base_tick + fps_frame_counter*1000000/TARGET_FPS) - curr_timing;
 

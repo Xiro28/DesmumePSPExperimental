@@ -1619,6 +1619,52 @@ static void CalculateTouchPressure(int pressurePercent, u16 &z1, u16& z2)
 
 }
 
+u8 pwm_val = 0;
+
+u8 MMU_readPowerMan()
+{
+	return pwm_val;
+}
+
+void MMU_writePowerMan(u8 val, bool hold){
+
+	if (!hold)
+    {
+        MMU.powerMan_CntRegWritten = FALSE;
+    }
+
+	if (hold && (!MMU.powerMan_CntRegWritten))
+	{
+		MMU.powerMan_CntReg = val;
+		MMU.powerMan_CntRegWritten = TRUE;
+		pwm_val = 0;
+	}
+	else
+	{
+		// TODO: DSi-specific registers in DSi mode
+        u32 regid = MMU.powerMan_CntReg & 0x07;
+
+		//(let's start with emulating a DS lite, since it is the more complex case)
+		if(MMU.powerMan_CntReg & 0x80)
+		{
+			//read
+			pwm_val = MMU.powerMan_Reg[regid];
+		}
+		else
+		{
+
+			const u8 RegMasks[8] = {0x7f, 0x00, 0x01, 0x03, 0x0f, 0x00, 0x00, 0x00};
+			//write
+			MMU.powerMan_Reg[regid] = (MMU.powerMan_Reg[regid] & ~RegMasks[regid]) | (val & RegMasks[regid]);
+
+		}
+
+		MMU.powerMan_CntRegWritten = FALSE;
+	}
+	
+	//T1WriteWord(MMU.MMU_MEM[ARMCPU_ARM7][(REG_SPIDATA >> 20) & 0xff], REG_SPIDATA & 0xfff, ret & 0x00FF);
+}
+
 void FASTCALL MMU_writeToSPIData(u16 val)
 {
 
@@ -2525,21 +2571,33 @@ void DmaController::doCopy()
 	//outside the loop
 	int time_elapsed = 0;
 	if(sz==4) {
-		/*if((src & 0x0F000000) == 0x02000000 && (dst>>20 == 0x70)){
-			time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
+		time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_READ, TRUE>(src, true)  * todo) + (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 32, MMU_AD_WRITE, TRUE>(dst, true) * todo);
+
+
+		if((src & 0x0F000000) == 0x02000000 && ((dst>>20 == 0x70) || ((dst >> 24) == 4 && ((dst >> 4) >= 0x400040) && ((dst + dstinc * todo) >> 4 < 0x400044)))){
 			
-			memcpy_vfpu(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], &MMU.MAIN_MEM[src & _MMU_MAIN_MEM_MASK32], todo);
+			if (dst>>20 == 0x70){
+				//printf("sound DMA\n");
+				memcpy(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], &MMU.MAIN_MEM[src & _MMU_MAIN_MEM_MASK32], todo);
+
+			}else if (nds.power1.gfx3d_geometry != 0 ){
+				//printf("GX FIFO DMA\n");
+				u32 * src_ptr = (u32*)(MMU.MMU_MEM[ARMCPU_ARM9][src >> 20] + (src & MMU.MMU_MASK[ARMCPU_ARM9][src>>20]));
+
+				memcpy(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], src_ptr, todo);
+
+				for(s32 i=(s32)todo; i>0; i--)
+					gfx3d_sendCommandToFIFO(*src_ptr++);		
+			}
 
 			dst += dstinc * todo;
 			src += srcinc * todo;
-			
+
 			//printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
-		}else*/{
-			//printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst, todo);
+		}else{
+			//printf("DMA: %08X -> %08X (%d words) (VRAM)\n", src, dst>>20, todo);
 			for(s32 i=(s32)todo; i>0; i--)
 			{
-				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_READ,TRUE>(src,true);
-				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,32,MMU_AD_WRITE,TRUE>(dst,true);
 				u32 temp = _MMU_read32(procnum,MMU_AT_DMA,src);
 				_MMU_write32(procnum,MMU_AT_DMA,dst, temp);   
 				dst += dstinc;
@@ -2548,8 +2606,8 @@ void DmaController::doCopy()
 		}
 	} else {
 
+		time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_READ, TRUE>(src, true)  * todo) + (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_WRITE, TRUE>(dst, true) * todo);
 		/*if((src & 0x0F000000) == 0x02000000 && (dst>>20 == 0x50)){
-			time_elapsed = (_MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_READ, TRUE>(src, true) + _MMU_accesstime<PROCNUM, MMU_AT_DMA, 16, MMU_AD_WRITE, TRUE>(dst, true)) * todo;
 			
 			memcpy_vfpu(&MMU.MMU_MEM[PROCNUM][dst>>20][dst&MMU.MMU_MASK[PROCNUM][dst>>20]], &MMU.MAIN_MEM[src & _MMU_MAIN_MEM_MASK32], todo/2);
 
@@ -2560,8 +2618,6 @@ void DmaController::doCopy()
 		}else{*/
 			for(s32 i=(s32)todo; i>0; i--)
 			{
-				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_READ,TRUE>(src,true);
-				time_elapsed += _MMU_accesstime<PROCNUM,MMU_AT_DMA,16,MMU_AD_WRITE,TRUE>(dst,true);
 				u16 temp = _MMU_read16(procnum,MMU_AT_DMA,src);
 				_MMU_write16(procnum,MMU_AT_DMA,dst, temp);
 				dst += dstinc;
@@ -2624,7 +2680,8 @@ void DmaController::doSchedule()
 {
 	dmaCheck = TRUE;
 	nextEvent = nds_timer;
-	NDS_RescheduleDMA();
+	NDS_ReschedulePtr = 1;
+	//NDS_RescheduleDMA();
 }
 
 
@@ -3432,7 +3489,7 @@ bool validateIORegsRead(u32 addr, u8 size)
 #endif
 
 
-bool isSlot2(u32 addr)
+FORCEINLINE bool isSlot2(u32 addr)
 {
 	if (addr < 0x08000000) return false;
 	if (addr >= 0x0A010000) return false;
@@ -5009,9 +5066,7 @@ void FASTCALL _MMU_ARM7_write08(u32 adr, u8 val)
 
 	if (SPU_core->isSPU(adr))
 	{
-		if (my_config.enable_sound)
-			SPU_WriteByte(adr, val);
-
+		SPU_WriteByte(adr, val);
 		return;
 	}
 
@@ -5124,9 +5179,7 @@ void FASTCALL _MMU_ARM7_write16(u32 adr, u16 val)
 
 	if (SPU_core->isSPU(adr))
 	{
-		if (my_config.enable_sound)
-			SPU_WriteWord(adr, val);
-
+		SPU_WriteWord(adr, val);
 		return;
 	}
 
@@ -5318,9 +5371,7 @@ void FASTCALL _MMU_ARM7_write32(u32 adr, u32 val)
 
 	if (SPU_core->isSPU(adr))
 	{
-		if (my_config.enable_sound)
-			SPU_WriteLong(adr, val);
-
+		SPU_WriteLong(adr, val);
 		return;
 	}
 

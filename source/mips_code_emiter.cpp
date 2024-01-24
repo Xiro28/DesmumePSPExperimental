@@ -2,16 +2,19 @@
 #include <cstdarg>
 #include <cstring>
 
+#include <pspsuspend.h>
+#include <pspkernel.h>
+
 #include "mips_code_emiter.h"
 
 //THE EMITER IS TAKEN FROM NULLDC PSP
 //CODE FROM Hlide AND Skmpt
 
-#define CODE_SIZE   (2*1024*1024)
+int CODE_SIZE = 8 * 1024 * 512; //4MB
 
 u32 LastAddr = 0;
 
-u8 __attribute__((aligned(64)))CodeCache[CODE_SIZE];
+u8 __attribute__((aligned(64)))* CodeCache;
 
 void* emit_GetPtr()      { return (void*)&CodeCache[LastAddr];                     }
 u32   emit_getCurrAdr()  { return (u32)&CodeCache[LastAddr];   					   }
@@ -25,7 +28,6 @@ u32   emit_Set(u32 _new)
 	LastAddr = _new;
 	return last;
 }
-
 
 //1+n opcodes
 void emit_mpush(u32 n, ...)
@@ -90,9 +92,18 @@ void make_address_range_executable(u32 address_start, u32 address_end)
 	}
 }
 
+
+void initCodeCache(){
+	sceKernelVolatileMemLock(0, reinterpret_cast<void**>(&CodeCache), &CODE_SIZE); 
+
+	memset(CodeCache, 0, CODE_SIZE);
+	LastAddr = 0;
+}
+
 void resetCodeCache(){
     memset(CodeCache, 0, CODE_SIZE);
     LastAddr = 0;
+	//make_address_range_executable((u32)CodeCache, (u32)CodeCache + CODE_SIZE);
 }
 
 uint32_t startAddr = 0;

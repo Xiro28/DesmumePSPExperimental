@@ -103,6 +103,13 @@ namespace DLDI
 	bool tryPatch(void* data, size_t size, unsigned int device);
 }
 
+
+namespace Sound_Nitro{
+    extern void OnIPCRequest(u32 data);
+    extern void Reset();
+    extern void Process(u32 param);
+}
+
 class FrameSkipper
 {
 public:
@@ -275,20 +282,25 @@ int renderScreen(JobData data)
 		PSP_UC(RenderDone) = true;
 		meUtilityDcacheWritebackInvalidateAll();
 
-		/*if (PSP_UC(my_config.enable_sound))
-			SPU_Emulate_core();*/
+		if (PSP_UC(my_config.enable_sound))
+			SPU_Emulate_core();
+		
+
+
 	}
 
 	return 1;
 }
+#include <unordered_map>
 
+std::unordered_map<u32, u32> cached_rom;
 int NDS_Init()
 {
 	nds.idleFrameCounter = 0;
 	memset(nds.runCycleCollector,0,sizeof(nds.runCycleCollector));
 
 	J_Init(false);
-
+	cached_rom.reserve(1024 * 1024 * 1);
 	MMU_Init();
 	
 	if (Screen_Init() != 0)
@@ -610,9 +622,7 @@ void GameInfo::closeROM()
 	lastReadPos = 0xFFFFFFFF;
 }
 
-#include <unordered_map>
 
-std::unordered_map<u32, u32> cached_rom;
 
 u32 GameInfo::readROM(u32 pos)
 {
@@ -639,7 +649,7 @@ u32 GameInfo::readROM(u32 pos)
 
 			return data;
 	#else
-		if (cached_rom.size() > 1024 * 128) cached_rom.clear();
+		if (cached_rom.size() > ((1024 * 1024 * 1) - sizeof(u32))) cached_rom.clear();
 
 		u32 data = cached_rom[pos];
 
@@ -904,7 +914,7 @@ template<int procnum, int num> struct TSequenceItem_Timer : public TSequenceItem
 	FORCEINLINE void exec()
 	{
 //		IF_DEVELOPER(DEBUG_statistics.sequencerExecutionCounters[13+procnum*4+num]++);
-		u8* regs = procnum==0?MMU.ARM9_REG:MMU.ARM7_REG;
+		u8* regs = MMU.ARM9_REG;
 		bool first = true;
 		//we'll need to check chained timers..
 		for(int i=num;i<4;i++)
@@ -1096,14 +1106,15 @@ struct TSequenceItem_ReadSlot1 : public TSequenceItem
 
 struct Sequencer
 {
-	bool nds_vblankEnded;
-	bool reschedule;
+	bool nds_vblankEnded;	
+	
 	TSequenceItem dispcnt;
 	TSequenceItem wifi;
+	TSequenceItem hle_audio;
 	TSequenceItem_divider divider;
 	TSequenceItem_sqrtunit sqrtunit;
 	TSequenceItem_GXFIFO gxfifo;
-	//TSequenceItem_ReadSlot1 readslot1;
+	TSequenceItem_ReadSlot1 readslot1;
 	TSequenceItem_DMA<0,0> dma_0_0; TSequenceItem_DMA<0,1> dma_0_1; 
 	TSequenceItem_DMA<0,2> dma_0_2; TSequenceItem_DMA<0,3> dma_0_3; 
 	TSequenceItem_DMA<1,0> dma_1_0; TSequenceItem_DMA<1,1> dma_1_1; 
@@ -1160,7 +1171,7 @@ struct Sequencer
 
 void NDS_RescheduleReadSlot1(int procnum, int size)
 {
-	/*u32 gcromctrl = T1ReadLong(MMU.MMU_MEM[procnum][0x40], 0x1A4);
+	u32 gcromctrl = T1ReadLong(MMU.MMU_MEM[procnum][0x40], 0x1A4);
 	
 	u32 clocks = (gcromctrl & (1<<27)) ? 8 : 5;
 	u32 gap = gcromctrl & 0x1FFF;
@@ -1178,7 +1189,7 @@ void NDS_RescheduleReadSlot1(int procnum, int size)
 	sequencer.readslot1.timestamp = nds_timer + delay;
 	sequencer.readslot1.enabled = true;
 
-	NDS_Reschedule();*/
+	NDS_Reschedule();
 }
 
 
@@ -1190,7 +1201,7 @@ void NDS_RescheduleGXFIFO(u32 cost)
 	}
 	MMU.gfx3dCycles += cost;
 	
-	sequencer.reschedule = true;
+	NDS_ReschedulePtr = 1;
 }
 
 void NDS_RescheduleTimers()
@@ -1200,13 +1211,13 @@ void NDS_RescheduleTimers()
 	//check(1,0); check(1,1); check(1,2); check(1,3);
 #undef check
 
-	sequencer.reschedule = true;
+	NDS_ReschedulePtr = 1;
 }
 
 void NDS_RescheduleDMA()
 {
 	//TBD
-	sequencer.reschedule = true;
+	NDS_ReschedulePtr = 1;
 }
 
 
@@ -1228,6 +1239,7 @@ static void initSchedule()
 //				= 33513982 cycles per second
 // 				= 33.513982 cycles per microsecond
 const u64 kWifiCycles = 67;//34*2;
+const u64 kAudioCycles = (u64)(174592.0f * 2.9f);
 //(this isn't very precise. I don't think it needs to be)
 
 void Sequencer::init()
@@ -1235,7 +1247,7 @@ void Sequencer::init()
 	NDS_RescheduleTimers();
 	NDS_RescheduleDMA();
 
-	reschedule = false;
+
 	nds_timer = 0;
 	nds_arm9_timer = 0;
 	nds_arm7_timer = 0;
@@ -1254,6 +1266,16 @@ void Sequencer::init()
 	dma_1_1.controller = &MMU_new.dma[1][1];
 	dma_1_2.controller = &MMU_new.dma[1][2];
 	dma_1_3.controller = &MMU_new.dma[1][3];
+
+	hle_audio.enabled = true;
+	hle_audio.timestamp = kAudioCycles;	
+
+	// test ptr
+	/* *(volatile bool*)(0x00010000) = 0;
+	printf("*reschedulePtr: %d\n", *reschedulePtr);
+	*(volatile bool*)(0x00010000) = 1;
+	printf("*reschedulePtr: %d\n", *reschedulePtr);*/ 
+	NDS_ReschedulePtr = 0;
 
 
 	#ifdef EXPERIMENTAL_WIFI_COMM
@@ -1287,7 +1309,7 @@ static void execHardware_hblank()
 static void execHardware_hstart_vblankEnd()
 {
 	sequencer.nds_vblankEnded = true;
-	sequencer.reschedule = true;
+	NDS_ReschedulePtr = 1;
 
 	//turn off vblank status bit
 	T1WriteWord(MMU.ARM9_REG, 4, T1ReadWord(MMU.ARM9_REG, 4) & ~1);
@@ -1382,7 +1404,7 @@ static void execHardware_hstart_irq()
 	//100% accurate emulation would require the read of VCOUNT to be in the pipeline already with the irq coming in behind it, thus 
 	//allowing the vcount to register as 192 occasionally (maybe about 1 out of 28 frames)
 	//the actual length of the delay is in execHardware() where the events are scheduled
-	sequencer.reschedule = true;
+	NDS_ReschedulePtr = 1;
 	if(nds.hw_status.VCount==192)
 	{
 		//when the vcount hits 192, vblank begins
@@ -1465,10 +1487,6 @@ static void execHardware_hstart()
 	}
 }
 
-void NDS_Reschedule()
-{
-	sequencer.reschedule = true;
-}
 
 FORCEINLINE u32 _fast_min32(u32 a, u32 b, u32 c, u32 d)
 {
@@ -1549,12 +1567,20 @@ void Sequencer::execHardware()
 			break;
 		}
 	}
+	
 	//if (readslot1.isTriggered()) readslot1.exec();
 
 	if (gxfifo.isTriggered()) gxfifo.exec();
 
 	if (sqrtunit.isTriggered()) sqrtunit.exec();
 	if (divider.isTriggered()) divider.exec();
+
+
+	if (hle_audio.isTriggered())
+	{
+		Sound_Nitro::Process(1);
+		hle_audio.timestamp += kAudioCycles;
+	}
 		
 #define test(X,Y) if(dma_##X##_##Y .isTriggered()) dma_##X##_##Y .exec();
 		test(0,0); test(0,1); test(0,2); test(0,3);
@@ -1609,48 +1635,7 @@ bool nds_loadstate(EMUFILE* is, int size)
 	return temp;
 }
 
-//these have not been tuned very well yet.
-static const int kMaxWork = 4000;
-static const int kIrqWait = 4000;
-
-template<bool jit>
-static FORCEINLINE void armInnerLoop(s32 s32next)
-{
-	u64 nds_timer_base = nds_timer;
-	
-	s32 arm7 = (s32)(nds_arm7_timer-nds_timer);
-	s32 arm9 = (s32)(nds_arm9_timer-nds_timer);
-	s32 timer = min(arm7,arm9);
-
-	//printf("arm7 %d arm9 %d\n",arm7,arm9);
-
-	while(timer < s32next && !sequencer.reschedule)
-	{
-
-		if(arm9 <= timer)
-		{
-			if(!(NDS_ARM9.freeze & CPU_FREEZE_WAIT_IRQ) && !nds.freezeBus)
-			{
-				arm9 += armcpu_exec<ARMCPU_ARM9,jit>();
-
-				timer = min(arm9,arm7);
-				nds_timer = nds_timer_base + timer;
-			}else{
-				s32 temp = arm9;
-				arm9 = min(s32next, arm9 + kIrqWait);
-				nds.idleCycles[0] += arm9-temp;
-				if (gxFIFO.size < 255) nds.freezeBus &= ~1;
-			}
-		}
-
-		timer = min(arm9,s32next);
-
-		nds_timer = nds_timer_base + timer;
-	}
-
-	nds_arm9_timer = nds_timer_base+arm9;
-	nds_arm7_timer = nds_timer_base+s32next;
-}
+const int kIrqWait = 4000;
 
 template<bool FORCE>
 void NDS_exec(s32 nb)
@@ -1684,27 +1669,42 @@ void NDS_exec(s32 nb)
 
 		//find next work unit:
 		u64 next = sequencer.findNext();
-		next = min(next,nds_timer+kMaxWork); //lets set an upper limit for now
 
-		sequencer.reschedule = false;
+		NDS_ReschedulePtr = 0;
 
 		s32 s32next = (s32)(next-nds_timer);
 
-		armInnerLoop<true>(s32next);
+		u64 nds_timer_base = nds_timer;
+	
+		s32 arm9 = (s32)(nds_arm9_timer-nds_timer);
+
+		while(arm9 < s32next && NDS_ReschedulePtr == 0 &&
+			(!(NDS_ARM9.freeze & CPU_FREEZE_WAIT_IRQ) && !nds.freezeBus))
+		{
+			arm9 += armcpu_exec<ARMCPU_ARM9,true>();
+
+		}
+
+		if (gxFIFO.size < 255) nds.freezeBus &= ~1;
+
+		arm9 = min(s32next, arm9 + kIrqWait);
+		nds_timer = nds_timer_base + arm9;
+		
+		nds.idleCycles[0] += s32next - arm9;
+		
+		nds_arm9_timer = nds_timer_base + arm9;
+		nds_arm7_timer = nds_timer_base;
 
 		//if we were waiting for an irq, don't wait too long:
 		//let's re-analyze it after this hardware event (this rolls back a big burst of irq waiting which may have been interrupted by a resynch)
-		if(NDS_ARM9.freeze & CPU_FREEZE_WAIT_IRQ)
+		/*if(NDS_ARM9.freeze & CPU_FREEZE_WAIT_IRQ)
 		{
 			nds.idleCycles[0] -= (s32)(nds_arm9_timer-nds_timer);
 			nds_arm9_timer = nds_timer;
-		}
+		}*/
 	}
 
 	executeARM7Stuff();
-
-	if (my_config.enable_sound)
-		SPU_Emulate_core();
 	
 	if (PSP_UC(RenderDone)){
 		EMU_SCREEN();
@@ -1713,6 +1713,9 @@ void NDS_exec(s32 nb)
 	}
 
 	if (IsEmu()){
+		if (my_config.enable_sound)
+		SPU_Emulate_core();
+
 		EMU_SCREEN();
 		renderScreenFull();
 	}
@@ -1948,8 +1951,6 @@ bool NDS_LegitBoot()
 //the fake firmware boot-up process
 bool NDS_FakeBoot()
 {
-
-
 	NDS_header * header = NDS_getROMHeader();
 
 	if (!header) return false;
@@ -1958,34 +1959,24 @@ bool NDS_FakeBoot()
 
 	//since we're bypassing the code to decrypt the secure area, we need to make sure its decrypted first
 	//this has not been validated on big endian systems. it almost positively doesn't work.
+	bool hasSecureArea = false;
 	if (gameInfo.header.CRC16 != 0)
 	{
-		bool okRom = DecryptSecureArea((u8*)&gameInfo.header, (u8*)gameInfo.secureArea);
+		int okRom = DecryptSecureArea((u8*)&gameInfo.header, (u8*)gameInfo.secureArea);
 
-		if(!okRom) {
+		if(okRom == -1)
+		{
+			printf("Specified file is not a valid rom\n");
 			return false;
 		}
+		else if (okRom == 1)
+		{
+			hasSecureArea = true;
+		}
 	}
-
-	//bios (or firmware) sets this default, which is generally not important for retail games but some homebrews are depending on
-	_MMU_write08<ARMCPU_ARM9>(REG_WRAMCNT,3);
-
-	//EDIT - whats this firmware and how is it relating to the dummy firmware below
-	//how do these even get used? what is the purpose of unpack and why is it not used by the firmware boot process?
-	if (CommonSettings.UseExtFirmware && firmware->loaded())
-	{
-		firmware->unpack();
-		firmware->loadSettings();
-	}
-
-	// Create the dummy firmware
-	//EDIT - whats dummy firmware and how is relating to the above?
-	//it seems to be emplacing basic firmware data into MMU.fw.data
-	NDS_CreateDummyFirmware(&CommonSettings.fw_config);
-
+	
 	//firmware loads the game card arm9 and arm7 programs as specified in rom header
 	{
-		bool hasSecureArea = ((gameInfo.romType == ROM_NDS) && (gameInfo.header.CRC16 != 0));
 		//copy the arm9 program to the address specified by rom header
 		u32 src = header->ARM9src;
 		u32 dst = header->ARM9cpy;
@@ -2010,7 +2001,7 @@ bool NDS_FakeBoot()
 			src += 4;
 		}
 	}
-
+	
 	//bios does this (thats weird, though. shouldnt it get changed when the card is swapped in the firmware menu?
 	//right now our firmware menu isnt detecting any change to the card.
 	//are some games depending on it being written here? please document.

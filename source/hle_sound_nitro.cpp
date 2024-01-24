@@ -24,10 +24,27 @@
 
 
 
+// MOST OF THE NEW IMPL ARE TAKEN FROM THERE: https://github.com/pret/pokediamond/blob/master/include/nitro/
+
 namespace Sound_Nitro
 {
 
 struct Track;
+
+struct SNDSharedWork
+{
+    u32 finishedCommandTag; // 0x0
+    u32 playerStatus; // 0x4
+    u16 channelStatus; // 0x8
+    u16 captureStatus; // 0xA
+    u8 unk_C[0x14]; // 0xC
+    struct
+    {
+        s16 localVars[16]; // local 0x0
+        u32 tickCounter; // local 0x20
+    } players[16]; // 0x20
+    s16 globalVars[16]; // 0x260
+};
 
 struct Channel
 {
@@ -337,11 +354,37 @@ u16 UpdateCounter();
 void UnlinkChannel(Channel* chan, bool unlink);
 
 
+//from https://github.com/pret/pokediamond/blob/master/arm7/lib/src/SND_exChannel.c
+static u32 sLockedChannelMask;
+static u32 sWeakLockedChannelMask;
+
+void SNDi_InitSharedWork(struct SNDSharedWork *sw) {
+
+    _MMU_write16<ARMCPU_ARM7>((u32)&sw->finishedCommandTag, 0);
+    _MMU_write32<ARMCPU_ARM7>((u32)&sw->playerStatus, 0);
+    _MMU_write16<ARMCPU_ARM7>((u32)&sw->channelStatus, 0);
+    _MMU_write16<ARMCPU_ARM7>((u32)&sw->captureStatus, 0);
+
+    for (s32 i = 0; i < 16; i++) {
+        _MMU_write32<ARMCPU_ARM7>((u32)&sw->players[i].tickCounter, 0);
+        for (s32 j = 0; j < 16; j++) {
+            _MMU_write16<ARMCPU_ARM7>((u32)&sw->players[i].localVars[i], -1);
+        }
+    }
+
+    for (s32 i = 0; i < 16; i++) {
+        _MMU_write16<ARMCPU_ARM7>((u32)&sw->globalVars[i], -1);
+    }
+}
+
+
 void Reset()
 {
     CmdQueue.Clear();
-    SharedMem = 0;
     Counter = 0;
+
+    sLockedChannelMask = 0;
+    sWeakLockedChannelMask = 0;
 
     memset(Channels, 0, sizeof(Channels));
     memset(Sequences, 0, sizeof(Sequences));
@@ -350,6 +393,8 @@ void Reset()
 
     memset(ChanVolume, 0, sizeof(ChanVolume));
     memset(ChanPan, 0, sizeof(ChanPan));
+
+
 
     MasterPan = -1;
     SurroundDecay = 0;
@@ -378,6 +423,8 @@ void Reset()
     }
 
     SPU_WriteWord(0x04000500, 0x807F);
+
+    SNDi_InitSharedWork((SNDSharedWork*)SharedMem);
 
     Version = 0;
 
@@ -530,6 +577,11 @@ void SetChannelVolume(int id, int vol, int voldiv)
 
     u16 cnt = (voldiv << 8) | vol;
     SPU_WriteWord(addr+0x00, cnt);
+}
+
+void SetChannelTimer(int idx, int timer){
+    u32 addr = (0x4000408 + ((int)idx) * 0x10);
+    SPU_WriteWord(addr+0x00, (0x10000 - timer));
 }
 
 void SetChannelPan(int id, int pan)
@@ -931,19 +983,13 @@ void ProcessCommands()
     while (!CmdQueue.IsEmpty())
     {
         u32 cmdbuf = CmdQueue.Read();
-        for (;;)
+        //printf("cmd %08X, shared mem %08X\n", cmdbuf, SharedMem);
+        for (;cmdbuf;)
         {
-            if (!cmdbuf)
-            {
-                u32 val = _MMU_read32<ARMCPU_ARM7>(SharedMem);
-                val++;
-                _MMU_write32<ARMCPU_ARM7>(SharedMem, val);
-
-                break;
-            }
-
             u32 next = _MMU_read32<ARMCPU_ARM7>(cmdbuf+0x00);
             u32 cmd = _MMU_read32<ARMCPU_ARM7>(cmdbuf+0x04);
+
+            //printf("cmd %08X %08X\n", next, cmd);
 
             u32 args[4];
             for (u32 i = 0; i < 4; i++)
@@ -1077,9 +1123,22 @@ void ProcessCommands()
 
             case 0xA: // write to sharedmem
                 {
-                    u32 addr = SharedMem + (args[0] * 0x24) + (args[1] * 2) + 0x20;
-                    _MMU_write16<ARMCPU_ARM7>(addr, args[2] & 0xFFFF);
+                    if (SharedMem){
+                        printf("Write local sharemem %08X %08X\n", args[0], args[1]);
+                        u32 addr = (u32)&((SNDSharedWork*)SharedMem)->players[args[0] & 0xF].localVars[args[1] & 0XF];
+                        _MMU_write16<ARMCPU_ARM7>(addr, args[2] & 0xFFFF);
+                    }
                 }
+                break;
+
+            case 0xB: // write to sharedmem
+                {
+                    if (SharedMem){
+                        printf("Write global sharemem %08X %08X\n", args[0], args[1]);
+                        u32 addr = (u32)&((SNDSharedWork*)SharedMem)->globalVars[args[0] & 0xF];
+                        _MMU_write16<ARMCPU_ARM7>(addr, args[1] & 0xFFFF);
+                    }
+                } 
                 break;
 
             case 0xC: // start
@@ -1241,6 +1300,19 @@ void ProcessCommands()
                 }
                 break;
 
+            case 0x13: // setup timer
+                {
+                    u32 channelMask = args[0];
+                    u32 timer = args[1];
+
+                    for (int i = 0; i < 16 && channelMask != 0; i++, channelMask >>= 1)
+                    {
+                        if (channelMask & 1)
+                            SetChannelTimer(i, timer);
+                    }
+                }
+                break;
+
             case 0x14: // set channel volume
                 {
                     for (int i = 0; i < 16; i++)
@@ -1314,9 +1386,39 @@ void ProcessCommands()
 
             case 0x1A:
                 {
-                    if (BIT25(args[0]))
-                        SharedMem = args[0];
-                    else{
+                    u32 channelMask = args[0];
+                    u32 weak = args[1];
+
+                    u32 j = channelMask;
+                    int i = 0;
+
+                    for (; i < 16 && j != 0; i++, j >>= 1)
+                    {
+                        if ((j & 1) == 0)
+                            continue;
+
+                        Channel* chan = &Channels[i];
+
+                        if (sLockedChannelMask & (1 << i))
+                            continue;
+
+                        StopChannel(i, false);
+                        chan->Priority = 0;
+
+                        // TODO fix me - change only bit 1 and bit 4-8 to 0
+                        chan->StatusFlags = 0;
+                    }
+
+                    if (weak & 1)
+                    {
+                        sWeakLockedChannelMask |= channelMask;
+                    }
+                    else
+                    {
+                        sLockedChannelMask |= channelMask;
+                    }
+
+                    {
                         //SharedMem += args[0];
                         printf("%08X\n", SharedMem);
                         printf("unknown sound cmd %08X, %08X %08X %08X %08X\n",
@@ -1325,8 +1427,52 @@ void ProcessCommands()
                 }
                 break;
 
+            case 0x1B:
+            {
+                u32 chnmask = args[0];
+                u32 weak = args[1];
+
+                if (weak & 1){
+                    sWeakLockedChannelMask &= ~chnmask;
+                }else{
+                    sLockedChannelMask &= ~chnmask;
+                }
+
+            }
+            break;
+
+            case 0x1C: 
+            {
+                u32 chnmask = args[0];
+                u32 flag = args[1];
+
+                printf("stop unlocked channel %08X, %08X %08X %08X %08X\n",
+                        cmd, chnmask, flag, args[2], args[3]);
+
+                for (int i = 0; i < 16 && chnmask != 0; i++, chnmask >>=1)
+                {
+                    if ((chnmask & 1) == 0)
+                        continue;
+
+                    Channel* chan = &Channels[i];
+
+                    if (sLockedChannelMask & (1 << i))
+                        continue;
+
+
+                    StopChannel(i, false);
+                    chan->Priority = 0;
+
+                    // TODO fix me - change only bit 1 and bit 4-8 to 0
+                    chan->StatusFlags = 0;
+                }
+
+                //ReportHardwareStatus();
+            }
+
             case 0x1D:
                 SharedMem = args[0];
+                //SharedMemPtr = (SNDSharedWork*)&MMU.MAIN_MEM[SharedMem];
                 break;
 
             case 0x20:
@@ -1346,6 +1492,9 @@ void ProcessCommands()
 
             cmdbuf = next;
         }
+
+        u32 val = _MMU_read32<ARMCPU_ARM7>(SharedMem);
+        _MMU_write32<ARMCPU_ARM7>(SharedMem, val+1);
     }
 }
 
