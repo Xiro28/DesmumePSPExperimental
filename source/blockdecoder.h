@@ -149,7 +149,7 @@ struct opcode{
     uint32_t rd;
     uint32_t rs1;
     uint32_t rs2;
-    uint32_t imm;
+    int32_t imm;
     uint32_t op_pc;
     uint32_t condition;
     uint32_t extra_flags;
@@ -157,7 +157,7 @@ struct opcode{
     op _op;
     opType preOpType;
 
-    opcode(op opcode, uint32_t rd, uint32_t rs1, uint32_t rs2, uint32_t imm, opType preOpType, uint32_t pc, uint32_t condition, uint32_t extra_flags){
+    opcode(op opcode, uint32_t rd, uint32_t rs1, uint32_t rs2, int32_t imm, opType preOpType, uint32_t pc, uint32_t condition, uint32_t extra_flags = EXTFL_NONE){
         this->_op = opcode;
         this->rd = rd;
         this->rs1 = rs1;
@@ -178,7 +178,7 @@ class block{
             printf("block created\n");
         }
 
-        void addOP(op _op, uint32_t pc, uint32 rd = -1, uint32 rs1 = -1, uint32 rs2 = -1, uint32 imm = -1, opType preOpType = PRE_OP_NONE, uint32_t condition = -1, uint32_t extra_flags = EXTFL_SAVECOND){
+        void addOP(op _op, uint32_t pc, uint32 rd = -1, uint32 rs1 = -1, uint32 rs2 = -1, int32_t imm = -1, opType preOpType = PRE_OP_NONE, uint32_t condition = -1, uint32_t extra_flags = EXTFL_SAVECOND){
             
             if ((_op >= OP_CMP && _op != OP_SWI) || condition != -1) uses_flags = true;
 

@@ -48,6 +48,7 @@ enum
 /* Registers */
 typedef enum
 {
+	psp_null = -1,
 	psp_gr0,  psp_r0  = psp_gr0,  psp_zr = psp_gr0, psp_zero = psp_gr0, psp_gpr = psp_gr0,
 	psp_gr1,  psp_r1  = psp_gr1,  psp_at = psp_gr1,
 	psp_gr2,  psp_r2  = psp_gr2,  psp_v0 = psp_gr2,

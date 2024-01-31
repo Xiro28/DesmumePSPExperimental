@@ -315,7 +315,8 @@ int main(int argc, char **argv) {
     EMU_Conf();
   #endif
 
-  
+  extern void test_jit_func();
+  test_jit_func();
 
   EMU_SCREEN();
 
